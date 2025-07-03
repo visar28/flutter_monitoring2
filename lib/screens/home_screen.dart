@@ -8,6 +8,8 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:io' if (dart.library.html) 'dart:html' as html;
 import 'drawer.dart';
+import '../widgets/modern_card.dart';
+import '../widgets/modern_chart_card.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -430,43 +432,14 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
     final colors = {
       'Close': Colors.green,
       'WShutt': Colors.orange,
-      'WMatt': Colors.yellow,
+      'WMatt': Colors.yellow.shade700,
       'Inprogress': Colors.blue,
       'Reschedule': Colors.red,
     };
 
-    final validEntries =
-        statusCount.entries.where((entry) => entry.value > 0).toList();
-
-    if (validEntries.isEmpty) {
-      return Center(
-        child: Text(
-          'Belum ada data status',
-          style: TextStyle(fontSize: 16, color: Colors.grey),
-        ),
-      );
-    }
-
-    return PieChart(
-      PieChartData(
-        sections:
-            validEntries.map((entry) {
-              final double value = entry.value.toDouble();
-              return PieChartSectionData(
-                color: colors[entry.key] ?? Colors.grey,
-                value: value,
-                title: '${entry.key}\n(${entry.value})',
-                radius: 60,
-                titleStyle: TextStyle(
-                  fontSize: 10,
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              );
-            }).toList(),
-        centerSpaceRadius: 40,
-        sectionsSpace: 2,
-      ),
+    return ModernPieChart(
+      data: statusCount,
+      colors: colors,
     );
   }
 
@@ -1017,374 +990,370 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
       });
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.green.shade50,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.green.shade200),
-          ),
-          child: Row(
+    return ModernCard(
+      margin: EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Icon(Icons.work, color: Colors.green.shade700),
-              SizedBox(width: 8),
-              Text(
-                '$kategori (${list.where((item) => item['wo'].toString().trim().isNotEmpty).length} items)',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                  color: Colors.green.shade700,
+              Container(
+                padding: EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(Icons.work, color: Colors.green.shade700, size: 20),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      kategori,
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: Colors.grey.shade800,
+                      ),
+                    ),
+                    Text(
+                      '${list.where((item) => item['wo'].toString().trim().isNotEmpty).length} items',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
-        ),
-        SizedBox(height: 8),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: DataTable(
-            headingRowColor: WidgetStateProperty.all(Colors.green.shade100),
-            headingTextStyle: TextStyle(
-              color: Colors.green.shade800,
-              fontWeight: FontWeight.bold,
-            ),
-            dataRowHeight: 60,
-            columns: const [
-              DataColumn(label: Text('No')),
-              DataColumn(label: Text('Work Order')),
-              DataColumn(label: Text('Deskripsi')),
-              DataColumn(label: Text('Type WO')),
-              DataColumn(label: Text('PIC')),
-              DataColumn(label: Text('Status')),
-              DataColumn(label: Text('Foto')),
-            ],
-            rows: List.generate(list.length, (index) {
-              final row = list[index];
-              final isEmptyRow = row['wo'].toString().trim().isEmpty;
+          SizedBox(height: 16),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: DataTable(
+              headingRowColor: WidgetStateProperty.all(Colors.green.shade50),
+              headingTextStyle: TextStyle(
+                color: Colors.green.shade800,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
+              dataRowHeight: 60,
+              columnSpacing: 16,
+              columns: const [
+                DataColumn(label: Text('No')),
+                DataColumn(label: Text('Work Order')),
+                DataColumn(label: Text('Deskripsi')),
+                DataColumn(label: Text('Type WO')),
+                DataColumn(label: Text('PIC')),
+                DataColumn(label: Text('Status')),
+                DataColumn(label: Text('Foto')),
+              ],
+              rows: List.generate(list.length, (index) {
+                final row = list[index];
+                final isEmptyRow = row['wo'].toString().trim().isEmpty;
 
-              return DataRow(
-                color: WidgetStateProperty.resolveWith<Color?>((
-                  Set<WidgetState> states,
-                ) {
-                  if (isEmptyRow) return Colors.grey.shade50;
-                  return null;
-                }),
-                cells: [
-                  DataCell(Text('${row['no']}')),
-                  DataCell(
-                    SizedBox(
-                      width: 120,
-                      child: TextFormField(
-                        initialValue: row['wo'].toString(),
-                        decoration: InputDecoration(
-                          border: InputBorder.none,
-                          hintText: 'WO-001',
-                          hintStyle: TextStyle(color: Colors.grey.shade400),
+                return DataRow(
+                  color: WidgetStateProperty.resolveWith<Color?>((
+                    Set<WidgetState> states,
+                  ) {
+                    if (isEmptyRow) return Colors.grey.shade50;
+                    return null;
+                  }),
+                  cells: [
+                    DataCell(Text('${row['no']}')),
+                    DataCell(
+                      SizedBox(
+                        width: 120,
+                        child: TextFormField(
+                          initialValue: row['wo'].toString(),
+                          decoration: InputDecoration(
+                            border: InputBorder.none,
+                            hintText: 'WO-001',
+                            hintStyle: TextStyle(color: Colors.grey.shade400),
+                          ),
+                          onChanged:
+                              (val) => _updateRowData(kategori, index, 'wo', val),
                         ),
-                        onChanged:
-                            (val) => _updateRowData(kategori, index, 'wo', val),
                       ),
                     ),
-                  ),
-                  DataCell(
-                    SizedBox(
-                      width: 400,
-                      child: TextFormField(
-                        initialValue: row['desc'].toString(),
-                        decoration: InputDecoration(
-                          border: InputBorder.none,
-                          hintText: 'Deskripsi pekerjaan...',
-                          hintStyle: TextStyle(color: Colors.grey.shade400),
+                    DataCell(
+                      SizedBox(
+                        width: 400,
+                        child: TextFormField(
+                          initialValue: row['desc'].toString(),
+                          decoration: InputDecoration(
+                            border: InputBorder.none,
+                            hintText: 'Deskripsi pekerjaan...',
+                            hintStyle: TextStyle(color: Colors.grey.shade400),
+                          ),
+                          maxLines: 2,
+                          onChanged:
+                              (val) =>
+                                  _updateRowData(kategori, index, 'desc', val),
                         ),
-                        maxLines: 2,
-                        onChanged:
-                            (val) =>
-                                _updateRowData(kategori, index, 'desc', val),
                       ),
                     ),
-                  ),
-                  DataCell(
-                  SizedBox(
-                    width: 100,
-                    child: TextFormField(
-                      initialValue: row['typeWO'].toString(),
-                        decoration: InputDecoration(
-                          border: InputBorder.none,
-                          hintText: 'Type WO',
-                          hintStyle: TextStyle(color: Colors.grey.shade400),
-                        ),
-                        onChanged:
-                            (val) =>
-                                _updateRowData(kategori, index, 'typeWO', val),
-                      ),
-                    ),
-                  ),
-                  DataCell(
+                    DataCell(
                     SizedBox(
                       width: 100,
                       child: TextFormField(
-                        initialValue: row['pic'].toString(),
-                        decoration: InputDecoration(
-                          border: InputBorder.none,
-                          hintText: 'PIC',
-                          hintStyle: TextStyle(color: Colors.grey.shade400),
+                        initialValue: row['typeWO'].toString(),
+                          decoration: InputDecoration(
+                            border: InputBorder.none,
+                            hintText: 'Type WO',
+                            hintStyle: TextStyle(color: Colors.grey.shade400),
+                          ),
+                          onChanged:
+                              (val) =>
+                                  _updateRowData(kategori, index, 'typeWO', val),
                         ),
-                        onChanged:
-                            (val) => _updateRowData(kategori, index, 'pic', val),
                       ),
                     ),
-                  ),
-                  DataCell(
-                    SizedBox(
-                      width: 120,
-                      child: DropdownButton<String?>(
-                        value: row['status'],
-                        hint: Text(
-                          'Pilih Status',
-                          style: TextStyle(fontSize: 12),
+                    DataCell(
+                      SizedBox(
+                        width: 100,
+                        child: TextFormField(
+                          initialValue: row['pic'].toString(),
+                          decoration: InputDecoration(
+                            border: InputBorder.none,
+                            hintText: 'PIC',
+                            hintStyle: TextStyle(color: Colors.grey.shade400),
+                          ),
+                          onChanged:
+                              (val) => _updateRowData(kategori, index, 'pic', val),
                         ),
-                        isExpanded: true,
-                        items: [
-                          DropdownMenuItem(
-                            value: null,
-                            child: Text('Pilih Status'),
-                          ),
-                          ...[
-                            'Close',
-                            'WShutt',
-                            'WMatt',
-                            'Inprogress',
-                            'Reschedule',
-                          ].map(
-                            (e) => DropdownMenuItem(value: e, child: Text(e)),
-                          ),
-                        ],
-                        onChanged:
-                            isEmptyRow
-                                ? null
-                                : (val) => _updateStatus(kategori, index, val),
                       ),
                     ),
-                  ),
-                  DataCell(
-                    SizedBox(
-                      width: 120,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          GestureDetector(
-                            onTap:
-                                row['photo']
-                                    ? () => _showPhotoPreview(kategori, index)
-                                    : null,
-                            child: Icon(
-                              row['photo'] ? Icons.check_circle : Icons.cancel,
-                              color: row['photo'] ? Colors.green : Colors.red,
-                              size: 20,
-                            ),
+                    DataCell(
+                      SizedBox(
+                        width: 120,
+                        child: DropdownButton<String?>(
+                          value: row['status'],
+                          hint: Text(
+                            'Pilih Status',
+                            style: TextStyle(fontSize: 12),
                           ),
-                          SizedBox(width: 4),
-                          IconButton(
-                            icon: Icon(
-                              row['photo'] ? Icons.photo : Icons.camera_alt,
-                              size: 20,
-                              color: row['photo'] ? Colors.green : Colors.grey,
+                          isExpanded: true,
+                          items: [
+                            DropdownMenuItem(
+                              value: null,
+                              child: Text('Pilih Status'),
                             ),
-                            onPressed:
-                                isEmptyRow
-                                    ? null
-                                    : () => _uploadPhoto(kategori, index),
-                            tooltip:
-                                row['photo']
-                                    ? 'Lihat/Ganti Foto'
-                                    : 'Upload Foto',
-                          ),
-                        ],
+                            ...[
+                              'Close',
+                              'WShutt',
+                              'WMatt',
+                              'Inprogress',
+                              'Reschedule',
+                            ].map(
+                              (e) => DropdownMenuItem(value: e, child: Text(e)),
+                            ),
+                          ],
+                          onChanged:
+                              isEmptyRow
+                                  ? null
+                                  : (val) => _updateStatus(kategori, index, val),
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              );
-            }),
+                    DataCell(
+                      SizedBox(
+                        width: 120,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            GestureDetector(
+                              onTap:
+                                  row['photo']
+                                      ? () => _showPhotoPreview(kategori, index)
+                                      : null,
+                              child: Icon(
+                                row['photo'] ? Icons.check_circle : Icons.cancel,
+                                color: row['photo'] ? Colors.green : Colors.red,
+                                size: 20,
+                              ),
+                            ),
+                            SizedBox(width: 4),
+                            IconButton(
+                              icon: Icon(
+                                row['photo'] ? Icons.photo : Icons.camera_alt,
+                                size: 20,
+                                color: row['photo'] ? Colors.green : Colors.grey,
+                              ),
+                              onPressed:
+                                  isEmptyRow
+                                      ? null
+                                      : () => _uploadPhoto(kategori, index),
+                              tooltip:
+                                  row['photo']
+                                      ? 'Lihat/Ganti Foto'
+                                      : 'Upload Foto',
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              }),
+            ),
           ),
-        ),
-        SizedBox(height: 20),
-      ],
+        ],
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.grey.shade50,
       appBar: AppBar(
         backgroundColor: Colors.white,
-        elevation: 1,
+        elevation: 0,
         title: Text(
           'Tactical WO',
           style: TextStyle(
-            color: Colors.green.shade700,
+            color: Colors.grey.shade800,
             fontWeight: FontWeight.bold,
           ),
         ),
-         iconTheme: IconThemeData(color: Colors.green.shade700),
+        iconTheme: IconThemeData(color: Colors.grey.shade800),
         actions: [
           Builder(
             builder:
                 (context) => IconButton(
-                  icon: Icon(Icons.menu, color: Colors.green.shade700),
+                  icon: Icon(Icons.menu, color: Colors.grey.shade800),
                   onPressed: () => Scaffold.of(context).openEndDrawer(),
                 ),
           ),
         ],
       ),
       endDrawer: AppDrawer(),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: ListView(
-          children: [
-            // File Upload Section
-            Container(
-              padding: EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.blue.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.blue.shade200),
-              ),
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.upload_file,
-                    size: 48,
-                    color: Colors.blue.shade600,
+      body: ListView(
+        padding: EdgeInsets.all(16),
+        children: [
+          // File Upload Section
+          ModernCard(
+            child: Column(
+              children: [
+                Container(
+                  padding: EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  SizedBox(height: 12),
-                  Text(
-                    'Upload File Excel Pekerjaan',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                      color: Colors.blue.shade700,
-                    ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.upload_file,
+                        size: 32,
+                        color: Colors.blue.shade600,
+                      ),
+                      SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Upload File Excel',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: Colors.blue.shade700,
+                              ),
+                            ),
+                            SizedBox(height: 4),
+                            Text(
+                              'Import data pekerjaan dari file Excel',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.blue.shade600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                  SizedBox(height: 12),
-                  ElevatedButton.icon(
-                    onPressed: isLoadingFile ? null : _pickFile,
-                    icon: isLoadingFile
-                        ? SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : Icon(Icons.file_upload),
-                    label: Text(
-                      isLoadingFile ? 'Loading...' : 'Pilih File Excel',
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blue.shade600,
-                      foregroundColor: Colors.white,
-                      padding: EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 12,
+                ),
+                SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: isLoadingFile ? null : _pickFile,
+                        icon: isLoadingFile
+                            ? SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : Icon(Icons.file_upload),
+                        label: Text(
+                          isLoadingFile ? 'Loading...' : 'Pilih File Excel',
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue.shade600,
+                          foregroundColor: Colors.white,
+                          padding: EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    selectedFileName,
-                    style: TextStyle(
-                      color: selectedFileName == 'Tidak ada file yang dipilih'
-                          ? Colors.grey.shade600
-                          : Colors.green.shade700,
-                      fontWeight: selectedFileName != 'Tidak ada file yang dipilih'
-                          ? FontWeight.w500
-                          : FontWeight.normal,
+                  ],
+                ),
+                if (selectedFileName != 'Tidak ada file yang dipilih') ...[
+                  SizedBox(height: 12),
+                  Container(
+                    padding: EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.green.shade200),
                     ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-            SizedBox(height: 24),
-
-            // Tables
-            _buildTable('Common'),
-            _buildTable('Boiler'),
-            _buildTable('Turbin'),
-
-            // Pie Chart Section
-            Container(
-              padding: EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.green.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.green.shade200),
-              ),
-              child: Column(
-                children: [
-                  Text(
-                    'Status Work Orders',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
-                      color: Colors.green.shade700,
-                    ),
-                  ),
-                  SizedBox(height: 16),
-                  SizedBox(height: 300, child: _buildPieChart()),
-                  SizedBox(height: 16),
-                  // Status Summary
-                  Wrap(
-                    spacing: 16,
-                    runSpacing: 8,
-                    children: statusCount.entries.map((entry) {
-                      return Container(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: _getStatusColor(entry.key).withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: _getStatusColor(entry.key),
+                    child: Row(
+                      children: [
+                        Icon(Icons.check_circle, color: Colors.green.shade700, size: 16),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            selectedFileName,
+                            style: TextStyle(
+                              color: Colors.green.shade700,
+                              fontWeight: FontWeight.w500,
+                              fontSize: 12,
+                            ),
                           ),
                         ),
-                        child: Text(
-                          '${entry.key}: ${entry.value}',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w500,
-                            color: _getStatusColor(entry.key),
-                          ),
-                        ),
-                      );
-                    }).toList(),
+                      ],
+                    ),
                   ),
                 ],
-              ),
+              ],
             ),
-          ],
-        ),
+          ),
+
+          SizedBox(height: 24),
+
+          // Tables
+          _buildTable('Common'),
+          _buildTable('Boiler'),
+          _buildTable('Turbin'),
+
+          // Chart Section
+          ModernChartCard(
+            title: 'Status Work Orders',
+            subtitle: 'Distribusi status pekerjaan tactical',
+            height: 400,
+            chart: _buildPieChart(),
+          ),
+        ],
       ),
     );
-  }
-
-  Color _getStatusColor(String status) {
-    switch (status) {
-      case 'Close':
-        return Colors.green;
-      case 'WShutt':
-        return Colors.orange;
-      case 'WMatt':
-        return Colors.yellow.shade700;
-      case 'Inprogress':
-        return Colors.blue;
-      case 'Reschedule':
-        return Colors.red;
-      default:
-        return Colors.grey;
-    }
   }
 }
