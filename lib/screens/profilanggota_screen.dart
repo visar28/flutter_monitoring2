@@ -36,8 +36,9 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
     try {
       setState(() => isLoading = true);
       
-      // Load all users
-      users = await _authService.getAllUsers();
+      // Load all users except admin
+      List<UserModel> allUsers = await _authService.getAllUsers();
+      users = allUsers.where((user) => user.role.toLowerCase() != 'admin').toList();
       
       // Calculate performance for each user
       for (var user in users) {
@@ -540,6 +541,199 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
     return Colors.red;
   }
 
+  // User Management Functions
+  Future<void> _showAddUserDialog() async {
+    final _formKey = GlobalKey<FormState>();
+    final _emailController = TextEditingController();
+    final _usernameController = TextEditingController();
+    final _passwordController = TextEditingController();
+    String _selectedRole = 'karyawan';
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Text('Tambah Anggota Baru'),
+              content: Form(
+                key: _formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextFormField(
+                      controller: _usernameController,
+                      decoration: InputDecoration(
+                        labelText: 'Username',
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Username wajib diisi';
+                        }
+                        return null;
+                      },
+                    ),
+                    SizedBox(height: 16),
+                    TextFormField(
+                      controller: _emailController,
+                      decoration: InputDecoration(
+                        labelText: 'Email',
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Email wajib diisi';
+                        }
+                        if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
+                          return 'Format email tidak valid';
+                        }
+                        return null;
+                      },
+                    ),
+                    SizedBox(height: 16),
+                    TextFormField(
+                      controller: _passwordController,
+                      decoration: InputDecoration(
+                        labelText: 'Password',
+                        border: OutlineInputBorder(),
+                      ),
+                      obscureText: true,
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Password wajib diisi';
+                        }
+                        if (value.length < 6) {
+                          return 'Password minimal 6 karakter';
+                        }
+                        return null;
+                      },
+                    ),
+                    SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      value: _selectedRole,
+                      decoration: InputDecoration(
+                        labelText: 'Role',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: [
+                        DropdownMenuItem(value: 'karyawan', child: Text('Karyawan')),
+                        DropdownMenuItem(value: 'supervisor', child: Text('Supervisor')),
+                      ],
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedRole = value!;
+                        });
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('Batal'),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    if (_formKey.currentState!.validate()) {
+                      try {
+                        await _authService.createUserWithEmailAndPassword(
+                          email: _emailController.text.trim(),
+                          password: _passwordController.text.trim(),
+                          username: _usernameController.text.trim(),
+                          role: _selectedRole,
+                        );
+                        Navigator.pop(context);
+                        _loadUsers();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Anggota berhasil ditambahkan'),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      } catch (e) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Error: $e'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    }
+                  },
+                  child: Text('Tambah'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _resetPassword(UserModel user) async {
+    try {
+      await _authService.sendPasswordResetEmail(user.email);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Email reset password telah dikirim ke ${user.email}'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _deleteUser(UserModel user) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Hapus Anggota'),
+          content: Text('Apakah Anda yakin ingin menghapus ${user.username}?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('Batal'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              child: Text('Hapus'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm == true) {
+      try {
+        await _authService.deleteUser(user.uid);
+        _loadUsers();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Anggota berhasil dihapus'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -556,6 +750,11 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
         ),
         iconTheme: IconThemeData(color: Colors.grey.shade800),
         actions: [
+          IconButton(
+            onPressed: _showAddUserDialog,
+            icon: Icon(Icons.person_add, color: Colors.green.shade700),
+            tooltip: 'Tambah Anggota',
+          ),
           Builder(
             builder: (context) => IconButton(
               icon: Icon(Icons.menu, color: Colors.grey.shade800),
@@ -595,6 +794,16 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
                               color: Colors.grey.shade600,
                             ),
                           ),
+                          SizedBox(height: 16),
+                          ElevatedButton.icon(
+                            onPressed: _showAddUserDialog,
+                            icon: Icon(Icons.person_add),
+                            label: Text('Tambah Anggota'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green.shade700,
+                              foregroundColor: Colors.white,
+                            ),
+                          ),
                         ],
                       ),
                     )
@@ -620,7 +829,7 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
                                   Icon(Icons.leaderboard, color: Colors.white, size: 32),
                                   SizedBox(width: 12),
                                   Text(
-                                    'Ranking Kinerja',
+                                    'Ranking Kinerja Anggota',
                                     style: TextStyle(
                                       color: Colors.white,
                                       fontSize: 20,
@@ -696,7 +905,42 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
                         ...users.asMap().entries.map((entry) {
                           int index = entry.key;
                           UserModel user = entry.value;
-                          return _buildPerformanceCard(user, index + 1);
+                          return Column(
+                            children: [
+                              _buildPerformanceCard(user, index + 1),
+                              // Action buttons for each user
+                              Container(
+                                margin: EdgeInsets.only(bottom: 16),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: OutlinedButton.icon(
+                                        onPressed: () => _resetPassword(user),
+                                        icon: Icon(Icons.lock_reset, size: 16),
+                                        label: Text('Reset Password'),
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: Colors.orange.shade700,
+                                          side: BorderSide(color: Colors.orange.shade700),
+                                        ),
+                                      ),
+                                    ),
+                                    SizedBox(width: 8),
+                                    Expanded(
+                                      child: OutlinedButton.icon(
+                                        onPressed: () => _deleteUser(user),
+                                        icon: Icon(Icons.delete, size: 16),
+                                        label: Text('Hapus'),
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: Colors.red.shade700,
+                                          side: BorderSide(color: Colors.red.shade700),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          );
                         }).toList(),
                       ],
                     ),

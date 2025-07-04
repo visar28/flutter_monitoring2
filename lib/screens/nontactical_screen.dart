@@ -191,7 +191,7 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
               'photoPath': wo['photoPath'],
               'photoData': wo['photoData'],
               'timestamp': wo['timestamp'],
-              'userId': _currentUserId,
+              'userId': wo['userId'], // Simpan userId yang sebenarnya close task
               'jenis_wo': 'Non Tactical',
             };
           }
@@ -260,7 +260,7 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
               'jenis_wo': 'Non Tactical',
               'pic': wo['pic'],
               'category': category,
-              'userId': _currentUserId,
+              'userId': wo['userId'], // Simpan userId yang sebenarnya close task
               'photoData': wo['photoData'],
               'createdAt': FieldValue.serverTimestamp(),
             });
@@ -385,6 +385,7 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
               'date': DateTime.parse(
                 wo['timestamp'] ?? DateTime.now().toIso8601String(),
               ).toString().substring(0, 10),
+              'userId': wo['userId'], // Simpan userId yang sebenarnya close task
             };
 
             bool exists = false;
@@ -701,7 +702,7 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
             'photoPath': null,
             'photoData': null,
             'timestamp': DateTime.now().toIso8601String(),
-            'userId': _currentUserId ?? '',
+            'userId': _currentUserId ?? '', // Set userId saat import
             'jenis_wo': 'Non Tactical',
           };
 
@@ -797,6 +798,8 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
 
       row['status'] = newStatus;
       row['timestamp'] = DateTime.now().toIso8601String();
+      // PENTING: Set userId ke user yang sedang login saat update status
+      row['userId'] = _currentUserId ?? '';
     });
 
     await _saveData();
@@ -847,6 +850,8 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
           categorizedWorkOrders[kategori]![index]['photoData'] = base64Image;
           categorizedWorkOrders[kategori]![index]['timestamp'] =
               DateTime.now().toIso8601String();
+          // Set userId ke user yang sedang login saat upload foto
+          categorizedWorkOrders[kategori]![index]['userId'] = _currentUserId ?? '';
         });
 
         await _saveData();
@@ -973,6 +978,8 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
       categorizedWorkOrders[kategori]![index][field] = value;
       categorizedWorkOrders[kategori]![index]['timestamp'] =
           DateTime.now().toIso8601String();
+      // Set userId ke user yang sedang login saat update data
+      categorizedWorkOrders[kategori]![index]['userId'] = _currentUserId ?? '';
     });
 
     _checkAndAddNewRow(kategori);

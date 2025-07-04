@@ -196,7 +196,7 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
               'photoPath': wo['photoPath'],
               'photoData': wo['photoData'],
               'timestamp': wo['timestamp'],
-              'userId': _currentUserId,
+              'userId': wo['userId'], // Simpan userId yang sebenarnya close task
               'jenis_wo': 'Tactical',
             };
           }
@@ -270,7 +270,7 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
               'jenis_wo': 'Tactical',
               'pic': wo['pic'],
               'category': category,
-              'userId': _currentUserId,
+              'userId': wo['userId'], // Simpan userId yang sebenarnya close task
               'photoData': wo['photoData'],
               'createdAt': FieldValue.serverTimestamp(),
             });
@@ -397,6 +397,7 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
               'date': DateTime.parse(
                 wo['timestamp'] ?? DateTime.now().toIso8601String(),
               ).toString().substring(0, 10),
+              'userId': wo['userId'], // Simpan userId yang sebenarnya close task
             };
 
             bool exists = false;
@@ -693,7 +694,7 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
           'photoPath': null,
           'photoData': null,
           'timestamp': DateTime.now().toIso8601String(),
-          'userId': _currentUserId ?? '',
+          'userId': _currentUserId ?? '', // Set userId saat import
           'jenis_wo': 'Tactical',
         };
 
@@ -783,6 +784,8 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
 
       row['status'] = newStatus;
       row['timestamp'] = DateTime.now().toIso8601String();
+      // PENTING: Set userId ke user yang sedang login saat update status
+      row['userId'] = _currentUserId ?? '';
     });
 
     await _saveData();
@@ -833,6 +836,8 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
           categorizedWorkOrders[kategori]![index]['photoData'] = base64Image;
           categorizedWorkOrders[kategori]![index]['timestamp'] =
               DateTime.now().toIso8601String();
+          // Set userId ke user yang sedang login saat upload foto
+          categorizedWorkOrders[kategori]![index]['userId'] = _currentUserId ?? '';
         });
 
         await _saveData();
@@ -959,6 +964,8 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
       categorizedWorkOrders[kategori]![index][field] = value;
       categorizedWorkOrders[kategori]![index]['timestamp'] =
           DateTime.now().toIso8601String();
+      // Set userId ke user yang sedang login saat update data
+      categorizedWorkOrders[kategori]![index]['userId'] = _currentUserId ?? '';
     });
 
     _checkAndAddNewRow(kategori);
