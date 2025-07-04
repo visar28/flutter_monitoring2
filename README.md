@@ -18,14 +18,14 @@ Aplikasi monitoring work order untuk PLTU Pacitan yang dibangun dengan Flutter d
 
 ### 👥 User Management (Admin/Supervisor)
 - **Role-based Access**: Admin, Supervisor, Karyawan
-- **Performance Monitoring**: Tracking kinerja karyawan
+- **Performance Monitoring**: Tracking kinerja karyawan berdasarkan user yang close task
 - **User Creation**: Buat akun karyawan baru
 - **Password Reset**: Reset password via email
 
 ### 📊 Analytics & Reports
 - **Performance Dashboard**: Pie charts dan bar charts
 - **Historical Data**: Tracking data historis
-- **Ranking System**: Peringkat kinerja karyawan
+- **Ranking System**: Peringkat kinerja karyawan berdasarkan task yang di-close
 - **Real-time Sync**: Sinkronisasi real-time dengan Firebase
 
 ## 🛠️ Teknologi
@@ -37,12 +37,13 @@ Aplikasi monitoring work order untuk PLTU Pacitan yang dibangun dengan Flutter d
 - **File Management**: Excel, File Picker
 - **Image**: Image Picker dengan compression
 
-## 📱 Instalasi & Setup
+## 📱 Setup & Running
 
 ### 1. Prerequisites
 ```bash
-# Install Flutter SDK
+# Install Flutter SDK 3.7+
 # Install Android Studio
+# Install JDK 17
 # Install VS Code (optional)
 ```
 
@@ -62,16 +63,77 @@ flutter pub get
 5. Download `GoogleService-Info.plist` untuk iOS
 6. Update `firebase_options.dart`
 
-### 4. Run Application
-```bash
-# Web
-flutter run -d web
+### 4. Android Setup untuk JDK 17
 
-# Android
+#### Update Gradle Configuration:
+- **Gradle Wrapper**: 8.4
+- **Android Gradle Plugin**: 8.3.0
+- **Kotlin**: 1.9.10
+- **Compile SDK**: 34
+- **Target SDK**: 34
+- **Min SDK**: 21
+- **Java Version**: 17
+
+#### Set JAVA_HOME:
+```bash
+# Windows
+set JAVA_HOME=C:\Java\jdk-17.0.1
+
+# macOS/Linux
+export JAVA_HOME=/path/to/jdk-17
+```
+
+### 5. Running the Application
+
+#### Web Development:
+```bash
+flutter run -d web
+```
+
+#### Android Development:
+```bash
+# List available devices
+flutter devices
+
+# Run on Android emulator
 flutter run -d android
 
-# iOS
+# Run on specific device
+flutter run -d <device-id>
+```
+
+#### iOS Development:
+```bash
 flutter run -d ios
+```
+
+### 6. Running Android Emulator from VS Code
+
+#### Setup Android Emulator:
+1. Open Android Studio
+2. Go to **Tools > AVD Manager**
+3. Create Virtual Device
+4. Choose device (Pixel 7, API 34 recommended)
+5. Download system image if needed
+6. Start emulator
+
+#### VS Code Setup:
+1. Install **Flutter** extension
+2. Install **Dart** extension
+3. Open Command Palette (`Ctrl+Shift+P`)
+4. Type "Flutter: Launch Emulator"
+5. Select your emulator
+6. Run `F5` or `Ctrl+F5` to start debugging
+
+#### Alternative VS Code Commands:
+```bash
+# Open terminal in VS Code
+flutter devices
+flutter run
+
+# For hot reload during development
+# Press 'r' in terminal for hot reload
+# Press 'R' for hot restart
 ```
 
 ## 🏗️ Struktur Project
@@ -88,177 +150,152 @@ lib/
 │   ├── login_screen.dart
 │   ├── home_screen.dart
 │   ├── history_screen.dart
-│   └── ...
+│   └── profilanggota_screen.dart
 ├── widgets/          # Reusable widgets
 │   ├── role_based_widget.dart
 │   └── scrollable_data_table.dart
 └── main.dart         # Entry point
 ```
 
-## 👤 User Roles
+## 👤 User Roles & Performance Logic
 
 ### 🔴 Admin
 - Full access ke semua fitur
 - Manajemen user (create, delete, reset password)
 - Monitoring kinerja semua karyawan
-- Access ke semua work order dan inventory
+- **TIDAK muncul** dalam tabel monitoring kinerja
 
 ### 🟡 Supervisor
 - Monitoring kinerja karyawan
 - Manajemen user terbatas
 - Access ke work order dan inventory
-- Tidak bisa delete admin
+- **Kinerja dimonitor** berdasarkan task yang di-close
 
 ### 🟢 Karyawan
 - Manajemen work order (tactical & non-tactical)
 - Inventory management (pengambilan & permintaan)
-- View history pribadi
+- **Kinerja dimonitor** berdasarkan task yang di-close
 - Update profile sendiri
 
-## 📊 Performance Metrics
+## 📊 Performance Metrics Logic
 
-### Calculation Formula
+### ✅ **Alur Kinerja yang Benar:**
+1. **Member Login** → Sistem catat userId
+2. **Member Close Task** → userId tercatat di task tersebut
+3. **Kinerja Dihitung** → Berdasarkan task yang di-close oleh userId tersebut
+4. **Admin Monitoring** → Melihat kinerja semua anggota (kecuali admin)
+
+### Calculation Formula:
 ```
 Kinerja (%) = (Total Completed Tasks / Total Tasks) × 100
 
 Where:
-- Completed Tasks = Tasks with status "Close"
-- Total Tasks = All assigned tasks (Tactical + Non-Tactical)
+- Completed Tasks = Tasks with status "Close" by specific userId
+- Total Tasks = All tasks assigned to specific userId
+- PIC field = Hanya nama, tidak mempengaruhi kinerja
+- userId = Yang menentukan siapa yang menyelesaikan task
 ```
 
-### Ranking System
+### Ranking System:
 - **🥇 Rank 1**: Highest performance percentage
 - **🥈 Rank 2-3**: Top performers
 - **📊 Others**: Ranked by performance descending
+- **Admin tidak muncul** dalam ranking
 
-## 🔧 Configuration
-
-### Firebase Rules (Firestore)
-```javascript
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    // Users collection
-    match /users/{userId} {
-      allow read, write: if request.auth != null;
-    }
-    
-    // Work orders
-    match /tactical_work_orders/{docId} {
-      allow read, write: if request.auth != null;
-    }
-    
-    match /nontactical_work_order/{docId} {
-      allow read, write: if request.auth != null;
-    }
-    
-    // History
-    match /work_order_history/{docId} {
-      allow read, write: if request.auth != null;
-    }
-  }
-}
-```
-
-### Firebase Auth Rules
-- Email/Password authentication enabled
-- Email verification disabled (for development)
-- Password reset enabled
-
-## 🚀 Deployment
-
-### Android APK
-```bash
-flutter build apk --release
-```
-
-### Web
-```bash
-flutter build web --release
-```
-
-### iOS
-```bash
-flutter build ios --release
-```
-
-## 🐛 Troubleshooting
+## 🔧 Troubleshooting
 
 ### Common Issues
 
-1. **Gradle Build Failed**
+1. **Gradle Build Failed (JDK 17)**
    ```bash
+   # Set JAVA_HOME
+   export JAVA_HOME=/path/to/jdk-17
+   
+   # Clean and rebuild
    cd android
    ./gradlew clean
    cd ..
    flutter clean
    flutter pub get
+   flutter build apk
    ```
 
-2. **Firebase Connection Issues**
+2. **Android Emulator Issues**
+   ```bash
+   # Check available devices
+   flutter devices
+   
+   # Cold boot emulator
+   # In Android Studio: AVD Manager > Cold Boot Now
+   
+   # Restart ADB
+   flutter doctor
+   adb kill-server
+   adb start-server
+   ```
+
+3. **Firebase Connection Issues**
    - Check `google-services.json` placement
    - Verify Firebase project configuration
    - Check internet connection
+   - Verify API keys in `firebase_options.dart`
 
-3. **Permission Issues (Android)**
-   - Check `AndroidManifest.xml` permissions
-   - Request runtime permissions for camera/storage
-
-4. **Excel Import/Export Issues**
-   - Check file format (xlsx/xls)
-   - Verify file structure matches expected format
-   - Check file permissions
+4. **Performance Tracking Issues**
+   - Pastikan user sudah login
+   - Check userId tersimpan di task
+   - Verify Firebase rules
+   - Check console logs untuk debug
 
 ## 📝 Data Structure
 
-### Work Order
+### Work Order dengan userId:
 ```dart
 {
   'wo': 'WO-001',
   'desc': 'Description',
   'typeWO': 'PM/CM/PAM',
-  'pic': 'Person in Charge',
+  'pic': 'Person in Charge', // Hanya nama, tidak mempengaruhi kinerja
   'status': 'Close/WShutt/WMatt/InProgress/Reschedule',
   'category': 'Common/Boiler/Turbin',
   'jenis_wo': 'Tactical/Non Tactical',
   'photo': true/false,
   'photoData': 'base64_string',
   'timestamp': 'ISO_date_string',
-  'userId': 'firebase_user_id',
+  'userId': 'firebase_user_id', // PENTING: Menentukan siapa yang close task
   'no': 1
 }
 ```
 
-### User
+### User Performance:
 ```dart
 {
-  'email': 'user@example.com',
-  'username': 'username',
-  'role': 'admin/supervisor/karyawan',
-  'createdAt': 'timestamp'
+  'userId': 'firebase_user_id',
+  'totalTasks': 10,
+  'completedTasks': 8,
+  'percentage': 80.0,
+  'incompleteTasks': [...]
 }
 ```
 
-## 🔄 Update & Maintenance
+## 🚀 Build & Deployment
 
-### Regular Tasks
-1. **Database Cleanup**: Archive old completed work orders
-2. **Performance Review**: Monthly performance analysis
-3. **User Management**: Regular user access review
-4. **Backup**: Regular Firebase backup
-5. **Updates**: Keep dependencies updated
+### Android APK:
+```bash
+flutter build apk --release
+```
 
-### Monitoring
-- Firebase Console untuk database monitoring
-- Firebase Analytics untuk usage tracking
-- Performance monitoring via Firebase Performance
+### Android Bundle:
+```bash
+flutter build appbundle --release
+```
 
-## 📞 Support
-
-Untuk support dan pertanyaan:
-- Email: support@pltu-pacitan.com
-- Internal: IT Department PLTU Pacitan
+### Web:
+```bash
+flutter build web --release
+```
 
 ---
 
 **© 2025 PLTU Pacitan - APK Monitoring System**
+
+**Updated for JDK 17 & Correct Performance Logic**

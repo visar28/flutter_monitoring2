@@ -55,6 +55,7 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
     final user = _auth.currentUser;
     if (user != null) {
       _currentUserId = user.uid;
+      print('Current User ID: $_currentUserId'); // Debug log
     } else {
       // Handle anonymous user or create a default user ID
       _currentUserId = 'anonymous_user';
@@ -75,7 +76,7 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
           'photoPath': null,
           'photoData': null,
           'timestamp': DateTime.now().toIso8601String(),
-          'userId': _currentUserId ?? '',
+          'userId': _currentUserId ?? '', // Set userId saat inisialisasi
           'jenis_wo': 'Non Tactical',
         });
       }
@@ -191,7 +192,7 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
               'photoPath': wo['photoPath'],
               'photoData': wo['photoData'],
               'timestamp': wo['timestamp'],
-              'userId': wo['userId'], // Simpan userId yang sebenarnya close task
+              'userId': wo['userId'], // Simpan userId yang sebenarnya
               'jenis_wo': 'Non Tactical',
             };
           }
@@ -702,7 +703,7 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
             'photoPath': null,
             'photoData': null,
             'timestamp': DateTime.now().toIso8601String(),
-            'userId': _currentUserId ?? '', // Set userId saat import
+            'userId': '', // Kosong saat import, akan diisi saat ada yang update
             'jenis_wo': 'Non Tactical',
           };
 
@@ -737,7 +738,7 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
           'photoPath': null,
           'photoData': null,
           'timestamp': DateTime.now().toIso8601String(),
-          'userId': _currentUserId ?? '',
+          'userId': _currentUserId ?? '', // Set userId saat import
           'jenis_wo': 'Non Tactical',
         });
       });
@@ -801,6 +802,8 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
       // PENTING: Set userId ke user yang sedang login saat update status
       row['userId'] = _currentUserId ?? '';
     });
+
+    print('Status updated by user: $_currentUserId for WO: ${row['wo']}'); // Debug log
 
     await _saveData();
   }
