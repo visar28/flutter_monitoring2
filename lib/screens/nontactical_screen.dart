@@ -9,6 +9,8 @@ import 'dart:typed_data';
 import 'drawer.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../services/auth_service.dart';
+import '../models/user_model.dart';
 
 class NonTacticalWOPage extends StatefulWidget {
   const NonTacticalWOPage({super.key});
@@ -40,7 +42,14 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
   // Firebase instances
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  final AuthService _authService = AuthService();
   String? _currentUserId;
+  UserModel? _currentUser;
+
+  // Date filtering
+  DateTime selectedDate = DateTime.now();
+  String selectedMonth = DateTime.now().month.toString().padLeft(2, '0');
+  String selectedYear = DateTime.now().year.toString();
 
   @override
   void initState() {
@@ -51,41 +60,44 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
     _loadFromFirebase();
   }
 
-  void _getCurrentUser() {
+  Future<void> _getCurrentUser() async {
     final user = _auth.currentUser;
     if (user != null) {
       _currentUserId = user.uid;
-      print('Current User ID: $_currentUserId'); // Debug log
-    } else {
-      // Handle anonymous user or create a default user ID
-      _currentUserId = 'anonymous_user';
+      _currentUser = await _authService.getCurrentUserData();
+      print('Current User: ${_currentUser?.username} (${_currentUser?.role})');
     }
+    setState(() {});
   }
 
   void _initializeEmptyRows() {
-    categorizedWorkOrders.forEach((key, value) {
-      if (value.isEmpty) {
-        value.add({
-          'no': 1,
-          'wo': '',
-          'desc': '',
-          'typeWO': '',
-          'pic': '',
-          'status': null,
-          'photo': false,
-          'photoPath': null,
-          'photoData': null,
-          'timestamp': DateTime.now().toIso8601String(),
-          'userId': _currentUserId ?? '', // Set userId saat inisialisasi
-          'jenis_wo': 'Non Tactical',
-        });
-      }
-    });
+    // Only initialize if user is admin
+    if (_currentUser?.isAdmin == true) {
+      categorizedWorkOrders.forEach((key, value) {
+        if (value.isEmpty) {
+          value.add({
+            'no': 1,
+            'wo': '',
+            'desc': '',
+            'typeWO': '',
+            'pic': '',
+            'status': null,
+            'photo': false,
+            'photoPath': null,
+            'photoData': null,
+            'timestamp': DateTime.now().toIso8601String(),
+            'assignedTo': '',
+            'jenis_wo': 'Non Tactical',
+            'date': DateTime.now().toIso8601String().split('T')[0],
+          });
+        }
+      });
+    }
   }
 
-  // Load data from Firebase
+  // Load data from Firebase with filtering
   Future<void> _loadFromFirebase() async {
-    if (_currentUserId == null) return;
+    if (_currentUserId == null || _currentUser == null) return;
 
     setState(() {
       isSyncingFirebase = true;
@@ -101,7 +113,6 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
       if (nontacticalSnapshot.exists) {
         final data = nontacticalSnapshot.data() as Map<String, dynamic>;
 
-        // Organize data by category
         Map<String, List<Map<String, dynamic>>> firebaseData = {
           'Common': [],
           'Boiler': [],
@@ -112,7 +123,35 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
         data.forEach((key, value) {
           if (value is Map<String, dynamic> && value['category'] != null) {
             final category = value['category'] as String;
-            if (firebaseData.containsKey(category)) {
+            
+            // Filter based on user role
+            bool shouldInclude = false;
+            
+            if (_currentUser!.isAdmin) {
+              // Admin sees all tasks
+              shouldInclude = true;
+            } else {
+              // Member only sees tasks assigned to them (PIC = username)
+              final picName = value['pic']?.toString().toLowerCase() ?? '';
+              final username = _currentUser!.username.toLowerCase();
+              shouldInclude = picName == username;
+            }
+
+            // Date filtering
+            final taskDate = value['date']?.toString() ?? '';
+            if (taskDate.isNotEmpty) {
+              final taskDateTime = DateTime.tryParse(taskDate);
+              if (taskDateTime != null) {
+                final taskMonth = taskDateTime.month.toString().padLeft(2, '0');
+                final taskYear = taskDateTime.year.toString();
+                
+                if (taskMonth != selectedMonth || taskYear != selectedYear) {
+                  shouldInclude = false;
+                }
+              }
+            }
+
+            if (shouldInclude && firebaseData.containsKey(category)) {
               firebaseData[category]!.add(Map<String, dynamic>.from(value));
             }
           }
@@ -129,26 +168,6 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
 
         _initializeEmptyRows();
         _recalculateStatusCount();
-      }
-
-      // Load status counts
-      final statusSnapshot =
-          await _firestore
-              .collection('status_counts')
-              .doc('stat_nontactical')
-              .get();
-
-      if (statusSnapshot.exists) {
-        final data = statusSnapshot.data() as Map<String, dynamic>;
-        setState(() {
-          statusCount = {
-            'Close': data['close'] ?? 0,
-            'WShutt': data['wshutt'] ?? 0,
-            'WMatt': data['wmatt'] ?? 0,
-            'Inprogress': data['inprogress'] ?? 0,
-            'Reschedule': data['reschedule'] ?? 0,
-          };
-        });
       }
     } catch (e) {
       print('Error loading from Firebase: $e');
@@ -167,7 +186,7 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
 
   // Save to Firebase
   Future<void> _saveToFirebase() async {
-    if (_currentUserId == null) return;
+    if (_currentUserId == null || !(_currentUser?.isAdmin == true)) return;
 
     setState(() {
       isSyncingFirebase = true;
@@ -192,8 +211,9 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
               'photoPath': wo['photoPath'],
               'photoData': wo['photoData'],
               'timestamp': wo['timestamp'],
-              'userId': wo['userId'], // Simpan userId yang sebenarnya
+              'assignedTo': wo['pic'], // PIC = assignedTo
               'jenis_wo': 'Non Tactical',
+              'date': wo['date'] ?? DateTime.now().toIso8601String().split('T')[0],
             };
           }
         }
@@ -204,17 +224,6 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
           .doc('nontactical')
           .set(nontacticalData);
 
-      // Save status counts
-      await _firestore.collection('status_counts').doc('stat_nontactical').set({
-        'close': statusCount['Close'],
-        'wshutt': statusCount['WShutt'],
-        'wmatt': statusCount['WMatt'],
-        'inprogress': statusCount['Inprogress'],
-        'reschedule': statusCount['Reschedule'],
-        'lastupdated': FieldValue.serverTimestamp(),
-      });
-
-      // Save completed work orders to history
       await _saveCompletedToHistory();
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -260,9 +269,10 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
               'status': wo['status'],
               'jenis_wo': 'Non Tactical',
               'pic': wo['pic'],
+              'assignedTo': wo['pic'], // PIC = assignedTo
               'category': category,
-              'userId': wo['userId'], // Simpan userId yang sebenarnya close task
               'photoData': wo['photoData'],
+              'date': wo['date'] ?? DateTime.now().toIso8601String().split('T')[0],
               'createdAt': FieldValue.serverTimestamp(),
             });
           }
@@ -280,7 +290,6 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final savedData = prefs.getString('nontactical_work_order');
-      final savedStatusCount = prefs.getString('nontactical_status_count');
 
       if (savedData != null) {
         final Map<String, dynamic> decodedData = json.decode(savedData);
@@ -295,17 +304,6 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
           );
         });
         _recalculateStatusCount();
-      }
-
-      if (savedStatusCount != null) {
-        final Map<String, dynamic> decodedStatusCount = json.decode(
-          savedStatusCount,
-        );
-        setState(() {
-          statusCount = decodedStatusCount.map(
-            (key, value) => MapEntry(key, value as int),
-          );
-        });
       }
     } catch (e) {
       print('Error loading saved data: $e');
@@ -341,28 +339,19 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
 
   Future<void> _saveData() async {
     try {
-      // Save to local storage
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(
         'nontactical_work_orders',
         json.encode(categorizedWorkOrders),
       );
-      await prefs.setString(
-        'nontactical_status_count',
-        json.encode(statusCount),
-      );
 
-      // Save to history
       await _saveToHistory();
-
-      // Save to Firebase
       await _saveToFirebase();
     } catch (e) {
       print('Error saving data: $e');
     }
   }
 
-  // Simpan ke history untuk sinkronisasi
   Future<void> _saveToHistory() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -383,10 +372,8 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
               'photoData': wo['photoData'],
               'timestamp': wo['timestamp'] ?? DateTime.now().toIso8601String(),
               'type': 'Non Tactical',
-              'date': DateTime.parse(
-                wo['timestamp'] ?? DateTime.now().toIso8601String(),
-              ).toString().substring(0, 10),
-              'userId': wo['userId'], // Simpan userId yang sebenarnya close task
+              'date': wo['date'] ?? DateTime.now().toIso8601String().split('T')[0],
+              'assignedTo': wo['pic'],
             };
 
             bool exists = false;
@@ -412,7 +399,6 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
       });
 
       await prefs.setStringList('work_order_history', historyList);
-      print('Saved ${historyList.length} items to history');
     } catch (e) {
       print('Error saving to history: $e');
     }
@@ -463,6 +449,17 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
   }
 
   Future<void> _pickFile() async {
+    // Only admin can import files
+    if (!(_currentUser?.isAdmin == true)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Hanya Admin yang dapat mengimport file Excel'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     setState(() {
       isLoadingFile = true;
     });
@@ -536,7 +533,7 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
 
       print('Reading Excel file with ${sheet.maxRows} rows');
 
-      String currentCategory = ''; // Mulai tanpa kategori
+      String currentCategory = '';
       Map<String, int> categoryCounters = {
         'Common': 1,
         'Boiler': 1,
@@ -557,31 +554,23 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
         }
         rowText = rowText.trim().toUpperCase();
 
-        print('Row $i: $rowText'); 
-
         if (rowText.contains('DIVISI COMMON')) {
           currentCategory = 'Common';
-          print('Found DIVISI COMMON at row $i');
           continue;
         } else if (rowText.contains('DIVISI BOILER')) {
           currentCategory = 'Boiler';
-          print('Found DIVISI BOILER at row $i');
           continue;
         } else if (rowText.contains('DIVISI TURBIN')) {
           currentCategory = 'Turbin';
-          print('Found DIVISI TURBIN at row $i');
           continue;
         }
 
         if (currentCategory.isEmpty) continue;
 
-        // Skip header row dengan kolom NO, WORK ORDER, etc.
         if (rowText.contains('NO') && rowText.contains('WORK ORDER')) {
-          print('Skipping header row at $i');
           continue;
         }
 
-        // Coba ambil data dari berbagai posisi kolom karena formatnya tidak konsisten
         String no = '';
         String wo = '';
         String desc = '';
@@ -589,7 +578,7 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
         String pic = '';
         String status = '';
 
-        // Cari Work Order (biasanya dimulai dengan WO)
+        // Find Work Order
         int woColumnIndex = -1;
         for (int j = 0; j < row.length && j < 8; j++) {
           final cellValue = row[j]?.value?.toString().trim() ?? '';
@@ -601,11 +590,11 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
           }
         }
 
- 
-        // Ambil nomor urut (biasanya sebelum WO atau bisa jadi angka di kolom pertama)
+        if (wo.isEmpty) continue;
+
+        // Get number
         if (woColumnIndex > 0) {
           no = row[woColumnIndex - 1]?.value?.toString().trim() ?? '';
-          // Jika bukan angka, gunakan counter kategori
           if (!RegExp(r'^\d+$').hasMatch(no)) {
             no = categoryCounters[currentCategory].toString();
           }
@@ -613,11 +602,12 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
           no = categoryCounters[currentCategory].toString();
         }
 
-        // Ambil deskripsi (biasanya setelah WO)
+        // Get description
         if (woColumnIndex >= 0 && woColumnIndex + 1 < row.length) {
           desc = row[woColumnIndex + 1]?.value?.toString().trim() ?? '';
         }
 
+        // Find PAM type and PIC
         for (int j = 0; j < row.length; j++) {
           final cellValue =
               row[j]?.value?.toString().trim().toUpperCase() ?? '';
@@ -657,6 +647,7 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
           }
         }
 
+        // Look for PAM in other formats
         if (typeWO.isEmpty) {
           for (int j = 0; j < row.length; j++) {
             final cellValue =
@@ -668,6 +659,7 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
           }
         }
 
+        // Find PIC if not found
         if (pic.isEmpty) {
           for (int j = 0; j < row.length; j++) {
             final cellValue = row[j]?.value?.toString().trim() ?? '';
@@ -691,6 +683,7 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
           }
         }
 
+        // Process PAM work orders
         if (wo.isNotEmpty && typeWO == 'PAM') {
           final newEntry = {
             'no': int.tryParse(no) ?? categoryCounters[currentCategory]!,
@@ -703,8 +696,9 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
             'photoPath': null,
             'photoData': null,
             'timestamp': DateTime.now().toIso8601String(),
-            'userId': '', // Kosong saat import, akan diisi saat ada yang update
+            'assignedTo': pic.isNotEmpty ? pic : 'PIC tidak tersedia',
             'jenis_wo': 'Non Tactical',
+            'date': DateTime.now().toIso8601String().split('T')[0],
           };
 
           setState(() {
@@ -718,30 +712,31 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
           categoryCounters[currentCategory] =
               categoryCounters[currentCategory]! + 1;
           print(
-            'Added PAM WO: $wo to category: $currentCategory with status: $status, PIC: $pic',
+            'Added PAM WO: $wo to category: $currentCategory with PIC: $pic',
           );
-        } else if (wo.isNotEmpty && typeWO.isNotEmpty && typeWO != 'PAM') {
-          print('Skipped non-PAM WO: $wo (Type: $typeWO)');
         }
       }
 
-      // Tambahkan baris kosong di akhir setiap kategori untuk input baru
-      categorizedWorkOrders.forEach((key, value) {
-        value.add({
-          'no': value.length + 1,
-          'wo': '',
-          'desc': '',
-          'typeWO': '',
-          'pic': '',
-          'status': null,
-          'photo': false,
-          'photoPath': null,
-          'photoData': null,
-          'timestamp': DateTime.now().toIso8601String(),
-          'userId': _currentUserId ?? '', // Set userId saat import
-          'jenis_wo': 'Non Tactical',
+      // Add empty row for admin
+      if (_currentUser?.isAdmin == true) {
+        categorizedWorkOrders.forEach((key, value) {
+          value.add({
+            'no': value.length + 1,
+            'wo': '',
+            'desc': '',
+            'typeWO': '',
+            'pic': '',
+            'status': null,
+            'photo': false,
+            'photoPath': null,
+            'photoData': null,
+            'timestamp': DateTime.now().toIso8601String(),
+            'assignedTo': '',
+            'jenis_wo': 'Non Tactical',
+            'date': DateTime.now().toIso8601String().split('T')[0],
+          });
         });
-      });
+      }
 
       await _saveData();
 
@@ -750,9 +745,6 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
         (sum, list) => sum + list.length - 1,
       );
       print('Excel import completed. Total PAM items: $totalItems');
-      print('Common PAM: ${categorizedWorkOrders['Common']!.length - 1} items');
-      print('Boiler PAM: ${categorizedWorkOrders['Boiler']!.length - 1} items');
-      print('Turbin PAM: ${categorizedWorkOrders['Turbin']!.length - 1} items');
     } catch (e) {
       print('Error reading Excel file: $e');
       throw Exception('Error reading Excel file: $e');
@@ -762,6 +754,31 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
   void _updateStatus(String kategori, int index, String? newStatus) async {
     final row = categorizedWorkOrders[kategori]![index];
     final oldStatus = row['status'];
+
+    // Admin cannot change status
+    if (_currentUser?.isAdmin == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Admin tidak dapat mengubah status task'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    // Member can only change status of their own tasks
+    final picName = row['pic']?.toString().toLowerCase() ?? '';
+    final username = _currentUser?.username.toLowerCase() ?? '';
+    
+    if (picName != username) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Anda hanya dapat mengubah status task yang ditugaskan kepada Anda'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
 
     if (newStatus == 'Close') {
       if (row['wo'].toString().trim().isEmpty) {
@@ -799,16 +816,39 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
 
       row['status'] = newStatus;
       row['timestamp'] = DateTime.now().toIso8601String();
-      // PENTING: Set userId ke user yang sedang login saat update status
-      row['userId'] = _currentUserId ?? '';
     });
-
-    print('Status updated by user: $_currentUserId for WO: ${row['wo']}'); // Debug log
 
     await _saveData();
   }
 
   void _uploadPhoto(String kategori, int index) async {
+    final row = categorizedWorkOrders[kategori]![index];
+    
+    // Admin cannot upload photos
+    if (_currentUser?.isAdmin == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Admin tidak dapat mengupload foto'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    // Member can only upload photos for their own tasks
+    final picName = row['pic']?.toString().toLowerCase() ?? '';
+    final username = _currentUser?.username.toLowerCase() ?? '';
+    
+    if (picName != username) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Anda hanya dapat mengupload foto untuk task yang ditugaskan kepada Anda'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     try {
       final ImageSource? source = await showDialog<ImageSource>(
         context: context,
@@ -853,8 +893,6 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
           categorizedWorkOrders[kategori]![index]['photoData'] = base64Image;
           categorizedWorkOrders[kategori]![index]['timestamp'] =
               DateTime.now().toIso8601String();
-          // Set userId ke user yang sedang login saat upload foto
-          categorizedWorkOrders[kategori]![index]['userId'] = _currentUserId ?? '';
         });
 
         await _saveData();
@@ -924,13 +962,14 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
                       onPressed: () => Navigator.pop(context),
                       child: Text('Tutup'),
                     ),
-                    ElevatedButton(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        _uploadPhoto(kategori, index);
-                      },
-                      child: Text('Ganti Foto'),
-                    ),
+                    if (!(_currentUser?.isAdmin == true))
+                      ElevatedButton(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _uploadPhoto(kategori, index);
+                        },
+                        child: Text('Ganti Foto'),
+                      ),
                   ],
                 ),
               ],
@@ -942,8 +981,10 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
   }
 
   void _checkAndAddNewRow(String kategori) async {
-    final list = categorizedWorkOrders[kategori]!;
+    // Only admin can add new rows
+    if (!(_currentUser?.isAdmin == true)) return;
 
+    final list = categorizedWorkOrders[kategori]!;
     if (list.isEmpty) return;
 
     final last = list.last;
@@ -963,8 +1004,9 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
           'photoPath': null,
           'photoData': null,
           'timestamp': DateTime.now().toIso8601String(),
-          'userId': _currentUserId ?? '',
+          'assignedTo': '',
           'jenis_wo': 'Non Tactical',
+          'date': DateTime.now().toIso8601String().split('T')[0],
         });
       });
       await _saveData();
@@ -977,27 +1019,105 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
     String field,
     String value,
   ) async {
+    // Only admin can edit task data
+    if (!(_currentUser?.isAdmin == true)) return;
+
     setState(() {
       categorizedWorkOrders[kategori]![index][field] = value;
       categorizedWorkOrders[kategori]![index]['timestamp'] =
           DateTime.now().toIso8601String();
-      // Set userId ke user yang sedang login saat update data
-      categorizedWorkOrders[kategori]![index]['userId'] = _currentUserId ?? '';
+      
+      // Update assignedTo when PIC is changed
+      if (field == 'pic') {
+        categorizedWorkOrders[kategori]![index]['assignedTo'] = value;
+      }
     });
 
     _checkAndAddNewRow(kategori);
     await _saveData();
   }
 
-  // Manual sync button
-  Future<void> _manualSync() async {
-    await _saveToFirebase();
+  // Date filter functions
+  Future<void> _selectDate() async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: selectedDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+    );
+    
+    if (picked != null && picked != selectedDate) {
+      setState(() {
+        selectedDate = picked;
+        selectedMonth = picked.month.toString().padLeft(2, '0');
+        selectedYear = picked.year.toString();
+      });
+      await _loadFromFirebase();
+    }
+  }
+
+  Widget _buildDateFilter() {
+    return Container(
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.blue.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.date_range, color: Colors.blue.shade600),
+              SizedBox(width: 8),
+              Text(
+                'Filter Tanggal',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: Colors.blue.shade700,
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _selectDate,
+                  icon: Icon(Icons.calendar_today, size: 16),
+                  label: Text('${selectedDate.day}/${selectedDate.month}/${selectedDate.year}'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue.shade600,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+              SizedBox(width: 12),
+              ElevatedButton.icon(
+                onPressed: _loadFromFirebase,
+                icon: Icon(Icons.refresh, size: 16),
+                label: Text('Refresh'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green.shade600,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildTable(String kategori) {
     final list = categorizedWorkOrders[kategori]!;
 
-    if (list.isEmpty || list.last['wo'].toString().trim().isNotEmpty) {
+    // Add empty row only for admin
+    if (_currentUser?.isAdmin == true && 
+        (list.isEmpty || list.last['wo'].toString().trim().isNotEmpty)) {
       list.add({
         'no': list.length + 1,
         'wo': '',
@@ -1009,8 +1129,9 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
         'photoPath': null,
         'photoData': null,
         'timestamp': DateTime.now().toIso8601String(),
-        'userId': _currentUserId ?? '',
+        'assignedTo': '',
         'jenis_wo': 'Non Tactical',
+        'date': DateTime.now().toIso8601String().split('T')[0],
       });
     }
 
@@ -1061,12 +1182,17 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
             rows: List.generate(list.length, (index) {
               final row = list[index];
               final isEmptyRow = row['wo'].toString().trim().isEmpty;
+              final isAdminMode = _currentUser?.isAdmin == true;
+              final picName = row['pic']?.toString().toLowerCase() ?? '';
+              final username = _currentUser?.username.toLowerCase() ?? '';
+              final isMyTask = picName == username;
 
               return DataRow(
                 color: WidgetStateProperty.resolveWith<Color?>((
                   Set<WidgetState> states,
                 ) {
                   if (isEmptyRow) return Colors.grey.shade50;
+                  if (!isAdminMode && isMyTask) return Colors.blue.shade50;
                   return null;
                 }),
                 cells: [
@@ -1074,7 +1200,7 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
                   DataCell(
                     SizedBox(
                       width: 120,
-                      child: TextFormField(
+                      child: isAdminMode ? TextFormField(
                         initialValue: row['wo'].toString(),
                         decoration: InputDecoration(
                           border: InputBorder.none,
@@ -1083,13 +1209,13 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
                         ),
                         onChanged:
                             (val) => _updateRowData(kategori, index, 'wo', val),
-                      ),
+                      ) : Text(row['wo'].toString()),
                     ),
                   ),
                   DataCell(
                     SizedBox(
                       width: 200,
-                      child: TextFormField(
+                      child: isAdminMode ? TextFormField(
                         initialValue: row['desc'].toString(),
                         decoration: InputDecoration(
                           border: InputBorder.none,
@@ -1100,13 +1226,17 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
                         onChanged:
                             (val) =>
                                 _updateRowData(kategori, index, 'desc', val),
+                      ) : Text(
+                        row['desc'].toString(),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ),
                   DataCell(
                     SizedBox(
                       width: 100,
-                      child: TextFormField(
+                      child: isAdminMode ? TextFormField(
                         initialValue: row['typeWO'].toString(),
                         decoration: InputDecoration(
                           border: InputBorder.none,
@@ -1116,13 +1246,13 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
                         onChanged:
                             (val) =>
                                 _updateRowData(kategori, index, 'typeWO', val),
-                      ),
+                      ) : Text(row['typeWO'].toString()),
                     ),
                   ),
                   DataCell(
                     SizedBox(
                       width: 100,
-                      child: TextFormField(
+                      child: isAdminMode ? TextFormField(
                         initialValue: row['pic'].toString(),
                         decoration: InputDecoration(
                           border: InputBorder.none,
@@ -1132,6 +1262,19 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
                         onChanged:
                             (val) =>
                                 _updateRowData(kategori, index, 'pic', val),
+                      ) : Container(
+                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isMyTask ? Colors.blue.shade100 : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          row['pic'].toString(),
+                          style: TextStyle(
+                            color: isMyTask ? Colors.blue.shade700 : Colors.grey.shade700,
+                            fontWeight: isMyTask ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -1160,10 +1303,9 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
                             (e) => DropdownMenuItem(value: e, child: Text(e)),
                           ),
                         ],
-                        onChanged:
-                            isEmptyRow
-                                ? null
-                                : (val) => _updateStatus(kategori, index, val),
+                        onChanged: (isEmptyRow || isAdminMode || !isMyTask)
+                            ? null
+                            : (val) => _updateStatus(kategori, index, val),
                       ),
                     ),
                   ),
@@ -1191,10 +1333,9 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
                               size: 20,
                               color: row['photo'] ? Colors.green : Colors.grey,
                             ),
-                            onPressed:
-                                isEmptyRow
-                                    ? null
-                                    : () => _uploadPhoto(kategori, index),
+                            onPressed: (isEmptyRow || isAdminMode || !isMyTask)
+                                ? null
+                                : () => _uploadPhoto(kategori, index),
                             tooltip:
                                 row['photo']
                                     ? 'Lihat/Ganti Foto'
@@ -1216,12 +1357,18 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_currentUser == null) {
+      return Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 1,
         title: Text(
-          'Non Tactical WO',
+          'Non Tactical WO - ${_currentUser!.role.toUpperCase()}',
           style: TextStyle(
             color: Colors.green.shade700,
             fontWeight: FontWeight.bold,
@@ -1243,72 +1390,119 @@ class _NonTacticalWOPageState extends State<NonTacticalWOPage> {
         padding: const EdgeInsets.all(16.0),
         child: ListView(
           children: [
-            // File Upload Section
-            Container(
-              padding: EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.blue.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.blue.shade200),
-              ),
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.upload_file,
-                    size: 48,
-                    color: Colors.blue.shade600,
-                  ),
-                  SizedBox(height: 12),
-                  Text(
-                    'Upload File Excel Pekerjaan',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                      color: Colors.blue.shade700,
+            // Date Filter
+            _buildDateFilter(),
+            SizedBox(height: 16),
+
+            // File Upload Section (Admin Only)
+            if (_currentUser!.isAdmin) ...[
+              Container(
+                padding: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.blue.shade200),
+                ),
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.upload_file,
+                      size: 48,
+                      color: Colors.blue.shade600,
                     ),
-                  ),
-                  SizedBox(height: 12),
-                  ElevatedButton.icon(
-                    onPressed: isLoadingFile ? null : _pickFile,
-                    icon:
-                        isLoadingFile
-                            ? SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                            : Icon(Icons.file_upload),
-                    label: Text(
-                      isLoadingFile ? 'Loading...' : 'Pilih File Excel',
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blue.shade600,
-                      foregroundColor: Colors.white,
-                      padding: EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 12,
+                    SizedBox(height: 12),
+                    Text(
+                      'Upload File Excel Pekerjaan (Admin Only)',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        color: Colors.blue.shade700,
                       ),
                     ),
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    selectedFileName,
-                    style: TextStyle(
-                      color:
-                          selectedFileName == 'Tidak ada file yang dipilih'
-                              ? Colors.grey.shade600
-                              : Colors.green.shade700,
-                      fontWeight:
-                          selectedFileName != 'Tidak ada file yang dipilih'
-                              ? FontWeight.w500
-                              : FontWeight.normal,
+                    SizedBox(height: 12),
+                    ElevatedButton.icon(
+                      onPressed: isLoadingFile ? null : _pickFile,
+                      icon:
+                          isLoadingFile
+                              ? SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                              : Icon(Icons.file_upload),
+                      label: Text(
+                        isLoadingFile ? 'Loading...' : 'Pilih File Excel',
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue.shade600,
+                        foregroundColor: Colors.white,
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 12,
+                        ),
+                      ),
                     ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
+                    SizedBox(height: 8),
+                    Text(
+                      selectedFileName,
+                      style: TextStyle(
+                        color:
+                            selectedFileName == 'Tidak ada file yang dipilih'
+                                ? Colors.grey.shade600
+                                : Colors.green.shade700,
+                        fontWeight:
+                            selectedFileName != 'Tidak ada file yang dipilih'
+                                ? FontWeight.w500
+                                : FontWeight.normal,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
               ),
-            ),
-            SizedBox(height: 24),
+              SizedBox(height: 24),
+            ],
+
+            // Info for Members
+            if (!_currentUser!.isAdmin) ...[
+              Container(
+                padding: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.blue.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info, color: Colors.blue.shade600, size: 24),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Halo ${_currentUser!.username}!',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue.shade700,
+                            ),
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            'Anda hanya dapat melihat dan mengelola task PAM yang ditugaskan kepada Anda',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.blue.shade600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(height: 24),
+            ],
 
             // Tables
             _buildTable('Common'),

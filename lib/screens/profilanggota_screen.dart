@@ -40,15 +40,15 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
       List<UserModel> allUsers = await _authService.getAllUsers();
       users = allUsers.where((user) => user.role.toLowerCase() != 'admin').toList();
       
-      // Calculate performance for each user
+      // Calculate performance for each user based on PIC
       for (var user in users) {
-        await _calculateUserPerformance(user.uid);
+        await _calculateUserPerformanceByPIC(user.username);
       }
       
       // Sort users by performance
       users.sort((a, b) {
-        double perfA = userPerformance[a.uid]?['percentage'] ?? 0.0;
-        double perfB = userPerformance[b.uid]?['percentage'] ?? 0.0;
+        double perfA = userPerformance[a.username]?['percentage'] ?? 0.0;
+        double perfB = userPerformance[b.username]?['percentage'] ?? 0.0;
         return perfB.compareTo(perfA);
       });
       
@@ -62,13 +62,13 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
     }
   }
 
-  Future<void> _calculateUserPerformance(String userId) async {
+  Future<void> _calculateUserPerformanceByPIC(String username) async {
     try {
       int totalTasks = 0;
       int completedTasks = 0;
       List<Map<String, dynamic>> incompleteTasks = [];
 
-      // Check tactical work orders
+      // Check tactical work orders by PIC
       final tacticalSnapshot = await _firestore
           .collection('tactical_work_orders')
           .doc('tactical')
@@ -77,26 +77,30 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
       if (tacticalSnapshot.exists) {
         final data = tacticalSnapshot.data() as Map<String, dynamic>;
         data.forEach((key, value) {
-          if (value is Map<String, dynamic> && 
-              value['userId'] == userId && 
-              value['wo']?.toString().trim().isNotEmpty == true) {
-            totalTasks++;
-            if (value['status'] == 'Close') {
-              completedTasks++;
-            } else {
-              incompleteTasks.add({
-                'wo': value['wo'],
-                'desc': value['desc'],
-                'status': value['status'],
-                'type': 'Tactical',
-                'category': value['category'],
-              });
+          if (value is Map<String, dynamic>) {
+            final picName = value['pic']?.toString().toLowerCase() ?? '';
+            final taskUsername = username.toLowerCase();
+            
+            if (picName == taskUsername && 
+                value['wo']?.toString().trim().isNotEmpty == true) {
+              totalTasks++;
+              if (value['status'] == 'Close') {
+                completedTasks++;
+              } else {
+                incompleteTasks.add({
+                  'wo': value['wo'],
+                  'desc': value['desc'],
+                  'status': value['status'],
+                  'type': 'Tactical',
+                  'category': value['category'],
+                });
+              }
             }
           }
         });
       }
 
-      // Check non-tactical work orders
+      // Check non-tactical work orders by PIC
       final nonTacticalSnapshot = await _firestore
           .collection('nontactical_work_order')
           .doc('nontactical')
@@ -105,20 +109,24 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
       if (nonTacticalSnapshot.exists) {
         final data = nonTacticalSnapshot.data() as Map<String, dynamic>;
         data.forEach((key, value) {
-          if (value is Map<String, dynamic> && 
-              value['userId'] == userId && 
-              value['wo']?.toString().trim().isNotEmpty == true) {
-            totalTasks++;
-            if (value['status'] == 'Close') {
-              completedTasks++;
-            } else {
-              incompleteTasks.add({
-                'wo': value['wo'],
-                'desc': value['desc'],
-                'status': value['status'],
-                'type': 'Non-Tactical',
-                'category': value['category'],
-              });
+          if (value is Map<String, dynamic>) {
+            final picName = value['pic']?.toString().toLowerCase() ?? '';
+            final taskUsername = username.toLowerCase();
+            
+            if (picName == taskUsername && 
+                value['wo']?.toString().trim().isNotEmpty == true) {
+              totalTasks++;
+              if (value['status'] == 'Close') {
+                completedTasks++;
+              } else {
+                incompleteTasks.add({
+                  'wo': value['wo'],
+                  'desc': value['desc'],
+                  'status': value['status'],
+                  'type': 'Non-Tactical',
+                  'category': value['category'],
+                });
+              }
             }
           }
         });
@@ -126,16 +134,18 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
 
       double percentage = totalTasks > 0 ? (completedTasks / totalTasks * 100) : 0.0;
 
-      userPerformance[userId] = {
+      userPerformance[username] = {
         'totalTasks': totalTasks,
         'completedTasks': completedTasks,
         'percentage': percentage,
         'incompleteTasks': incompleteTasks,
       };
 
+      print('Performance for $username: $completedTasks/$totalTasks (${percentage.toStringAsFixed(1)}%)');
+
     } catch (e) {
-      print('Error calculating performance for user $userId: $e');
-      userPerformance[userId] = {
+      print('Error calculating performance for user $username: $e');
+      userPerformance[username] = {
         'totalTasks': 0,
         'completedTasks': 0,
         'percentage': 0.0,
@@ -145,7 +155,7 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
   }
 
   void _showIncompleteTasksModal(UserModel user) {
-    final incompleteTasks = userPerformance[user.uid]?['incompleteTasks'] as List<Map<String, dynamic>>? ?? [];
+    final incompleteTasks = userPerformance[user.username]?['incompleteTasks'] as List<Map<String, dynamic>>? ?? [];
     
     showDialog(
       context: context,
@@ -313,6 +323,7 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
       case 'Close':
         return Colors.green;
       case 'InProgress':
+      case 'Inprogress':
         return Colors.orange;
       case 'Reschedule':
         return Colors.red;
@@ -326,7 +337,7 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
   }
 
   Widget _buildPerformanceCard(UserModel user, int rank) {
-    final performance = userPerformance[user.uid];
+    final performance = userPerformance[user.username];
     final percentage = performance?['percentage'] ?? 0.0;
     final completedTasks = performance?['completedTasks'] ?? 0;
     final totalTasks = performance?['totalTasks'] ?? 0;
@@ -473,7 +484,7 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      'Kinerja',
+                      'Kinerja (berdasarkan PIC)',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
@@ -750,11 +761,13 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
         ),
         iconTheme: IconThemeData(color: Colors.grey.shade800),
         actions: [
-          IconButton(
-            onPressed: _showAddUserDialog,
-            icon: Icon(Icons.person_add, color: Colors.green.shade700),
-            tooltip: 'Tambah Anggota',
-          ),
+          // Only admin can add users
+          if (currentUser?.isAdmin == true)
+            IconButton(
+              onPressed: _showAddUserDialog,
+              icon: Icon(Icons.person_add, color: Colors.green.shade700),
+              tooltip: 'Tambah Anggota',
+            ),
           Builder(
             builder: (context) => IconButton(
               icon: Icon(Icons.menu, color: Colors.grey.shade800),
@@ -794,16 +807,18 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
                               color: Colors.grey.shade600,
                             ),
                           ),
-                          SizedBox(height: 16),
-                          ElevatedButton.icon(
-                            onPressed: _showAddUserDialog,
-                            icon: Icon(Icons.person_add),
-                            label: Text('Tambah Anggota'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.green.shade700,
-                              foregroundColor: Colors.white,
+                          if (currentUser?.isAdmin == true) ...[
+                            SizedBox(height: 16),
+                            ElevatedButton.icon(
+                              onPressed: _showAddUserDialog,
+                              icon: Icon(Icons.person_add),
+                              label: Text('Tambah Anggota'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.green.shade700,
+                                foregroundColor: Colors.white,
+                              ),
                             ),
-                          ),
+                          ],
                         ],
                       ),
                     )
@@ -840,7 +855,7 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
                               ),
                               SizedBox(height: 8),
                               Text(
-                                'Klik pada kartu anggota untuk melihat task yang belum selesai',
+                                'Kinerja berdasarkan PIC (nama di kolom PIC = username member)\nKlik pada kartu anggota untuk melihat task yang belum selesai',
                                 style: TextStyle(
                                   color: Colors.white.withOpacity(0.9),
                                   fontSize: 14,
@@ -876,7 +891,7 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
                                         Text(
-                                          '${users.where((u) => (userPerformance[u.uid]?['percentage'] ?? 0.0) >= 80).length}',
+                                          '${users.where((u) => (userPerformance[u.username]?['percentage'] ?? 0.0) >= 80).length}',
                                           style: TextStyle(
                                             color: Colors.white,
                                             fontSize: 24,
@@ -908,37 +923,38 @@ class _AturProfilAnggotaPageState extends State<AturProfilAnggotaPage> {
                           return Column(
                             children: [
                               _buildPerformanceCard(user, index + 1),
-                              // Action buttons for each user
-                              Container(
-                                margin: EdgeInsets.only(bottom: 16),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: OutlinedButton.icon(
-                                        onPressed: () => _resetPassword(user),
-                                        icon: Icon(Icons.lock_reset, size: 16),
-                                        label: Text('Reset Password'),
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor: Colors.orange.shade700,
-                                          side: BorderSide(color: Colors.orange.shade700),
+                              // Action buttons for each user (Admin only)
+                              if (currentUser?.isAdmin == true)
+                                Container(
+                                  margin: EdgeInsets.only(bottom: 16),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: OutlinedButton.icon(
+                                          onPressed: () => _resetPassword(user),
+                                          icon: Icon(Icons.lock_reset, size: 16),
+                                          label: Text('Reset Password'),
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: Colors.orange.shade700,
+                                            side: BorderSide(color: Colors.orange.shade700),
+                                          ),
                                         ),
                                       ),
-                                    ),
-                                    SizedBox(width: 8),
-                                    Expanded(
-                                      child: OutlinedButton.icon(
-                                        onPressed: () => _deleteUser(user),
-                                        icon: Icon(Icons.delete, size: 16),
-                                        label: Text('Hapus'),
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor: Colors.red.shade700,
-                                          side: BorderSide(color: Colors.red.shade700),
+                                      SizedBox(width: 8),
+                                      Expanded(
+                                        child: OutlinedButton.icon(
+                                          onPressed: () => _deleteUser(user),
+                                          icon: Icon(Icons.delete, size: 16),
+                                          label: Text('Hapus'),
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: Colors.red.shade700,
+                                            side: BorderSide(color: Colors.red.shade700),
+                                          ),
                                         ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
-                              ),
                             ],
                           );
                         }).toList(),

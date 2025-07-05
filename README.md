@@ -4,28 +4,59 @@ Aplikasi monitoring work order untuk PLTU Pacitan yang dibangun dengan Flutter d
 
 ## 🚀 Fitur Utama
 
-### 📋 Work Order Management
-- **Tactical Work Order**: Manajemen PM, CM dengan kategori Common, Boiler, Turbin
-- **Non-Tactical Work Order**: Manajemen PAM dengan kategori yang sama
+### 📋 Work Order Management (PIC-Based System)
+- **Admin**: Import Excel, input data task, melihat semua task, tidak bisa edit status
+- **Member**: Hanya melihat task dengan PIC = username mereka, bisa close task
+- **Performance Tracking**: Berdasarkan PIC (kolom PIC = username member)
 - **Status Tracking**: Close, WShutt, WMatt, InProgress, Reschedule
 - **Photo Upload**: Wajib upload foto untuk status Close
-- **Excel Import/Export**: Import data dari Excel dan export hasil
+- **Date Filtering**: Filter per hari, bulan, tahun
+
+### 📊 Role-Based Access Control
+
+#### 🔴 **Admin**
+- ✅ Import Excel task harian
+- ✅ Input data task manual
+- ✅ Melihat semua task
+- ✅ Melihat halaman Manajemen Anggota (read-only)
+- ❌ Tidak bisa mengubah status task
+- ❌ Tidak bisa upload foto
+- ❌ Tidak muncul dalam ranking kinerja
+
+#### 🟢 **Member/Karyawan**
+- ✅ Melihat task dengan PIC = username mereka
+- ✅ Mengubah status task mereka
+- ✅ Upload foto untuk task mereka
+- ✅ Kinerja dimonitor berdasarkan task yang di-close
+- ❌ Tidak bisa melihat task orang lain
+- ❌ Tidak bisa import Excel
+
+### 📈 Performance Logic (PIC-Based)
+```
+Kinerja (%) = (Task Close dengan PIC = username) / (Total Task dengan PIC = username) × 100
+
+Contoh:
+- Didian memiliki 10 task (PIC = "Didian")
+- Didian sudah close 3 task
+- Kinerja Didian = 3/10 × 100 = 30%
+```
 
 ### 📦 Inventory Management
 - **Pengambilan Barang**: Tracking barang yang diambil
 - **Permintaan Barang**: Manajemen permintaan barang
 - **Excel Integration**: Import/export data inventory
 
-### 👥 User Management (Admin/Supervisor)
+### 👥 User Management
 - **Role-based Access**: Admin, Supervisor, Karyawan
-- **Performance Monitoring**: Tracking kinerja karyawan berdasarkan user yang close task
-- **User Creation**: Buat akun karyawan baru
-- **Password Reset**: Reset password via email
+- **Performance Monitoring**: Ranking berdasarkan PIC
+- **User Creation**: Buat akun karyawan baru (Admin only)
+- **Password Reset**: Reset password via email (Admin only)
 
 ### 📊 Analytics & Reports
 - **Performance Dashboard**: Pie charts dan bar charts
 - **Historical Data**: Tracking data historis
-- **Ranking System**: Peringkat kinerja karyawan berdasarkan task yang di-close
+- **Ranking System**: Peringkat kinerja berdasarkan PIC
+- **Date Filtering**: Filter per hari, bulan, tahun
 - **Real-time Sync**: Sinkronisasi real-time dengan Firebase
 
 ## 🛠️ Teknologi
@@ -160,40 +191,39 @@ lib/
 ## 👤 User Roles & Performance Logic
 
 ### 🔴 Admin
-- Full access ke semua fitur
-- Manajemen user (create, delete, reset password)
-- Monitoring kinerja semua karyawan
-- **TIDAK muncul** dalam tabel monitoring kinerja
+- Import Excel task harian
+- Input data task dengan PIC = username member
+- Melihat semua task (read-only)
+- Melihat halaman Manajemen Anggota (read-only)
+- **TIDAK bisa** mengubah status atau upload foto
+- **TIDAK muncul** dalam ranking kinerja
 
 ### 🟡 Supervisor
-- Monitoring kinerja karyawan
-- Manajemen user terbatas
-- Access ke work order dan inventory
+- Melihat task dengan PIC = username mereka
+- Mengubah status dan upload foto untuk task mereka
 - **Kinerja dimonitor** berdasarkan task yang di-close
 
 ### 🟢 Karyawan
-- Manajemen work order (tactical & non-tactical)
-- Inventory management (pengambilan & permintaan)
+- Melihat task dengan PIC = username mereka
+- Mengubah status dan upload foto untuk task mereka
 - **Kinerja dimonitor** berdasarkan task yang di-close
-- Update profile sendiri
 
 ## 📊 Performance Metrics Logic
 
 ### ✅ **Alur Kinerja yang Benar:**
-1. **Member Login** → Sistem catat userId
-2. **Member Close Task** → userId tercatat di task tersebut
-3. **Kinerja Dihitung** → Berdasarkan task yang di-close oleh userId tersebut
-4. **Admin Monitoring** → Melihat kinerja semua anggota (kecuali admin)
+1. **Admin Import Excel** → PIC diisi dengan username member
+2. **Member Login** → Melihat task dengan PIC = username mereka
+3. **Member Close Task** → Kinerja member naik
+4. **Admin Monitoring** → Melihat ranking berdasarkan PIC
 
 ### Calculation Formula:
 ```
-Kinerja (%) = (Total Completed Tasks / Total Tasks) × 100
+Kinerja (%) = (Total Completed Tasks dengan PIC = username) / (Total Tasks dengan PIC = username) × 100
 
 Where:
-- Completed Tasks = Tasks with status "Close" by specific userId
-- Total Tasks = All tasks assigned to specific userId
-- PIC field = Hanya nama, tidak mempengaruhi kinerja
-- userId = Yang menentukan siapa yang menyelesaikan task
+- PIC = Username member (kolom PIC di Excel = username member)
+- Completed Tasks = Tasks with status "Close" dengan PIC = username
+- Total Tasks = All tasks dengan PIC = username
 ```
 
 ### Ranking System:
@@ -202,7 +232,74 @@ Where:
 - **📊 Others**: Ranked by performance descending
 - **Admin tidak muncul** dalam ranking
 
-## 🔧 Troubleshooting
+## 🔧 Build & Deployment
+
+### Android APK:
+```bash
+# Debug APK
+flutter build apk --debug
+
+# Release APK
+flutter build apk --release
+```
+
+### Android Bundle:
+```bash
+flutter build appbundle --release
+```
+
+### Web:
+```bash
+flutter build web --release
+```
+
+### Tahapan Build APK:
+
+#### 1. **Persiapan Environment:**
+```bash
+# Pastikan JDK 17 terinstall
+java -version
+
+# Set JAVA_HOME
+export JAVA_HOME=/path/to/jdk-17
+
+# Pastikan Android SDK terinstall
+flutter doctor
+```
+
+#### 2. **Clean & Get Dependencies:**
+```bash
+flutter clean
+flutter pub get
+```
+
+#### 3. **Build APK:**
+```bash
+# Debug APK (untuk testing)
+flutter build apk --debug
+
+# Release APK (untuk production)
+flutter build apk --release
+```
+
+#### 4. **Lokasi APK:**
+```bash
+# Debug APK
+build/app/outputs/flutter-apk/app-debug.apk
+
+# Release APK
+build/app/outputs/flutter-apk/app-release.apk
+```
+
+#### 5. **Install APK ke Device:**
+```bash
+# Via ADB
+adb install build/app/outputs/flutter-apk/app-release.apk
+
+# Atau copy file APK ke device dan install manual
+```
+
+## 🚀 Troubleshooting
 
 ### Common Issues
 
@@ -241,27 +338,27 @@ Where:
    - Verify API keys in `firebase_options.dart`
 
 4. **Performance Tracking Issues**
-   - Pastikan user sudah login
-   - Check userId tersimpan di task
-   - Verify Firebase rules
+   - Pastikan PIC di Excel = username member
+   - Check Firebase rules
    - Check console logs untuk debug
 
 ## 📝 Data Structure
 
-### Work Order dengan userId:
+### Work Order dengan PIC-based tracking:
 ```dart
 {
   'wo': 'WO-001',
   'desc': 'Description',
   'typeWO': 'PM/CM/PAM',
-  'pic': 'Person in Charge', // Hanya nama, tidak mempengaruhi kinerja
+  'pic': 'username_member', // PENTING: Harus sama dengan username
   'status': 'Close/WShutt/WMatt/InProgress/Reschedule',
   'category': 'Common/Boiler/Turbin',
   'jenis_wo': 'Tactical/Non Tactical',
   'photo': true/false,
   'photoData': 'base64_string',
   'timestamp': 'ISO_date_string',
-  'userId': 'firebase_user_id', // PENTING: Menentukan siapa yang close task
+  'assignedTo': 'username_member', // Same as PIC
+  'date': 'YYYY-MM-DD',
   'no': 1
 }
 ```
@@ -269,33 +366,16 @@ Where:
 ### User Performance:
 ```dart
 {
-  'userId': 'firebase_user_id',
-  'totalTasks': 10,
-  'completedTasks': 8,
+  'username': 'member_username',
+  'totalTasks': 10, // Tasks dengan PIC = username
+  'completedTasks': 8, // Tasks Close dengan PIC = username
   'percentage': 80.0,
   'incompleteTasks': [...]
 }
-```
-
-## 🚀 Build & Deployment
-
-### Android APK:
-```bash
-flutter build apk --release
-```
-
-### Android Bundle:
-```bash
-flutter build appbundle --release
-```
-
-### Web:
-```bash
-flutter build web --release
 ```
 
 ---
 
 **© 2025 PLTU Pacitan - APK Monitoring System**
 
-**Updated for JDK 17 & Correct Performance Logic**
+**Updated for PIC-Based Performance Logic & JDK 17**

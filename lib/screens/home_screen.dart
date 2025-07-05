@@ -12,6 +12,8 @@ import '../widgets/modern_card.dart';
 import '../widgets/modern_chart_card.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../services/auth_service.dart';
+import '../models/user_model.dart';
 
 class TacticalWOPage extends StatefulWidget {
   const TacticalWOPage({super.key});
@@ -43,7 +45,14 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
   // Firebase instances
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  final AuthService _authService = AuthService();
   String? _currentUserId;
+  UserModel? _currentUser;
+
+  // Date filtering
+  DateTime selectedDate = DateTime.now();
+  String selectedMonth = DateTime.now().month.toString().padLeft(2, '0');
+  String selectedYear = DateTime.now().year.toString();
 
   @override
   void initState() {
@@ -54,48 +63,50 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
     _loadFromFirebase();
   }
 
-  void _getCurrentUser() {
+  Future<void> _getCurrentUser() async {
     final user = _auth.currentUser;
     if (user != null) {
       _currentUserId = user.uid;
-      print('Current User ID: $_currentUserId'); // Debug log
-    } else {
-      // Handle anonymous user or create a default user ID
-      _currentUserId = 'anonymous_user';
+      _currentUser = await _authService.getCurrentUserData();
+      print('Current User: ${_currentUser?.username} (${_currentUser?.role})');
     }
+    setState(() {});
   }
 
   void _initializeEmptyRows() {
-    categorizedWorkOrders.forEach((key, value) {
-      if (value.isEmpty) {
-        value.add({
-          'no': 1,
-          'wo': '',
-          'desc': '',
-          'typeWO': '',
-          'pic': '',
-          'status': null,
-          'photo': false,
-          'photoPath': null,
-          'photoData': null,
-          'timestamp': DateTime.now().toIso8601String(),
-          'userId': _currentUserId ?? '', // Set userId saat inisialisasi
-          'jenis_wo': 'Tactical',
-        });
-      }
-    });
+    // Only initialize if user is admin
+    if (_currentUser?.isAdmin == true) {
+      categorizedWorkOrders.forEach((key, value) {
+        if (value.isEmpty) {
+          value.add({
+            'no': 1,
+            'wo': '',
+            'desc': '',
+            'typeWO': '',
+            'pic': '',
+            'status': null,
+            'photo': false,
+            'photoPath': null,
+            'photoData': null,
+            'timestamp': DateTime.now().toIso8601String(),
+            'assignedTo': '', // PIC username
+            'jenis_wo': 'Tactical',
+            'date': DateTime.now().toIso8601String().split('T')[0],
+          });
+        }
+      });
+    }
   }
 
-  // Load data from Firebase
+  // Load data from Firebase with filtering
   Future<void> _loadFromFirebase() async {
-    if (_currentUserId == null) return;
+    if (_currentUserId == null || _currentUser == null) return;
 
     setState(() {
       isSyncingFirebase = true;
     });
 
     try {
-      // Load tactical work orders
       final tacticalSnapshot = await _firestore
           .collection('tactical_work_orders')
           .doc('tactical')
@@ -104,7 +115,6 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
       if (tacticalSnapshot.exists) {
         final data = tacticalSnapshot.data() as Map<String, dynamic>;
         
-        // Organize data by category
         Map<String, List<Map<String, dynamic>>> firebaseData = {
           'Common': [],
           'Boiler': [],
@@ -115,7 +125,35 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
         data.forEach((key, value) {
           if (value is Map<String, dynamic> && value['category'] != null) {
             final category = value['category'] as String;
-            if (firebaseData.containsKey(category)) {
+            
+            // Filter based on user role
+            bool shouldInclude = false;
+            
+            if (_currentUser!.isAdmin) {
+              // Admin sees all tasks
+              shouldInclude = true;
+            } else {
+              // Member only sees tasks assigned to them (PIC = username)
+              final picName = value['pic']?.toString().toLowerCase() ?? '';
+              final username = _currentUser!.username.toLowerCase();
+              shouldInclude = picName == username;
+            }
+
+            // Date filtering
+            final taskDate = value['date']?.toString() ?? '';
+            if (taskDate.isNotEmpty) {
+              final taskDateTime = DateTime.tryParse(taskDate);
+              if (taskDateTime != null) {
+                final taskMonth = taskDateTime.month.toString().padLeft(2, '0');
+                final taskYear = taskDateTime.year.toString();
+                
+                if (taskMonth != selectedMonth || taskYear != selectedYear) {
+                  shouldInclude = false;
+                }
+              }
+            }
+
+            if (shouldInclude && firebaseData.containsKey(category)) {
               firebaseData[category]!.add(Map<String, dynamic>.from(value));
             }
           }
@@ -132,25 +170,6 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
 
         _initializeEmptyRows();
         _recalculateStatusCount();
-      }
-
-      // Load status counts
-      final statusSnapshot = await _firestore
-          .collection('status_counts')
-          .doc('stat_tactical')
-          .get();
-
-      if (statusSnapshot.exists) {
-        final data = statusSnapshot.data() as Map<String, dynamic>;
-        setState(() {
-          statusCount = {
-            'Close': data['close'] ?? 0,
-            'WShutt': data['wshutt'] ?? 0,
-            'WMatt': data['wmatt'] ?? 0,
-            'Inprogress': data['inprogress'] ?? 0,
-            'Reschedule': data['reschedule'] ?? 0,
-          };
-        });
       }
 
     } catch (e) {
@@ -170,14 +189,13 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
 
   // Save to Firebase
   Future<void> _saveToFirebase() async {
-    if (_currentUserId == null) return;
+    if (_currentUserId == null || !(_currentUser?.isAdmin == true)) return;
 
     setState(() {
       isSyncingFirebase = true;
     });
 
     try {
-      // Prepare tactical work orders data
       Map<String, dynamic> tacticalData = {};
       int counter = 0;
 
@@ -197,33 +215,19 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
               'photoPath': wo['photoPath'],
               'photoData': wo['photoData'],
               'timestamp': wo['timestamp'],
-              'userId': wo['userId'], // Simpan userId yang sebenarnya
+              'assignedTo': wo['pic'], // PIC = assignedTo
               'jenis_wo': 'Tactical',
+              'date': wo['date'] ?? DateTime.now().toIso8601String().split('T')[0],
             };
           }
         }
       });
 
-      // Save tactical work orders
       await _firestore
           .collection('tactical_work_orders')
           .doc('tactical')
           .set(tacticalData);
 
-      // Save status counts
-      await _firestore
-          .collection('status_counts')
-          .doc('stat_tactical')
-          .set({
-        'close': statusCount['Close'],
-        'wshutt': statusCount['WShutt'],
-        'wmatt': statusCount['WMatt'],
-        'inprogress': statusCount['Inprogress'],
-        'reschedule': statusCount['Reschedule'],
-        'lastupdated': FieldValue.serverTimestamp(),
-      });
-
-      // Save completed work orders to history
       await _saveCompletedToHistory();
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -270,9 +274,10 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
               'status': wo['status'],
               'jenis_wo': 'Tactical',
               'pic': wo['pic'],
+              'assignedTo': wo['pic'], // PIC = assignedTo
               'category': category,
-              'userId': wo['userId'], // Simpan userId yang sebenarnya close task
               'photoData': wo['photoData'],
+              'date': wo['date'] ?? DateTime.now().toIso8601String().split('T')[0],
               'createdAt': FieldValue.serverTimestamp(),
             });
           }
@@ -285,12 +290,10 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
     }
   }
 
-  // Load data yang tersimpan dari SharedPreferences
   Future<void> _loadSavedData() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final savedData = prefs.getString('tactical_work_orders');
-      final savedStatusCount = prefs.getString('tactical_status_count');
 
       if (savedData != null) {
         final Map<String, dynamic> decodedData = json.decode(savedData);
@@ -306,24 +309,12 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
         });
         _recalculateStatusCount();
       }
-
-      if (savedStatusCount != null) {
-        final Map<String, dynamic> decodedStatusCount = json.decode(
-          savedStatusCount,
-        );
-        setState(() {
-          statusCount = decodedStatusCount.map(
-            (key, value) => MapEntry(key, value as int),
-          );
-        });
-      }
     } catch (e) {
       print('Error loading saved data: $e');
       _initializeEmptyRows();
     }
   }
 
-  // Recalculate status count from existing data
   void _recalculateStatusCount() {
     Map<String, int> newStatusCount = {
       'Close': 0,
@@ -349,24 +340,15 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
     });
   }
 
-
   Future<void> _saveData() async {
     try {
-      // Save to local storage
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(
         'tactical_work_orders',
         json.encode(categorizedWorkOrders),
       );
-      await prefs.setString(
-        'tactical_status_count',
-        json.encode(statusCount),
-      );
 
-      // Save to history
       await _saveToHistory();
-
-      // Save to Firebase
       await _saveToFirebase();
 
     } catch (e) {
@@ -374,7 +356,6 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
     }
   }
 
-  // Simpan ke history untuk sinkronisasi
   Future<void> _saveToHistory() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -395,10 +376,8 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
               'photoData': wo['photoData'],
               'timestamp': wo['timestamp'] ?? DateTime.now().toIso8601String(),
               'type': 'Tactical',
-              'date': DateTime.parse(
-                wo['timestamp'] ?? DateTime.now().toIso8601String(),
-              ).toString().substring(0, 10),
-              'userId': wo['userId'], // Simpan userId yang sebenarnya close task
+              'date': wo['date'] ?? DateTime.now().toIso8601String().split('T')[0],
+              'assignedTo': wo['pic'],
             };
 
             bool exists = false;
@@ -424,7 +403,6 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
       });
 
       await prefs.setStringList('work_order_history', historyList);
-      print('Saved ${historyList.length} items to history');
     } catch (e) {
       print('Error saving to history: $e');
     }
@@ -446,6 +424,17 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
   }
 
   Future<void> _pickFile() async {
+    // Only admin can import files
+    if (!(_currentUser?.isAdmin == true)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Hanya Admin yang dapat mengimport file Excel'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     setState(() {
       isLoadingFile = true;
     });
@@ -492,262 +481,240 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
   }
 
   Future<void> _readExcelFile(Uint8List bytes) async {
-  try {
-    final excel = ex.Excel.decodeBytes(bytes);
+    try {
+      final excel = ex.Excel.decodeBytes(bytes);
 
-    if (excel.tables.isEmpty) {
-      throw Exception('File Excel kosong atau tidak valid');
-    }
+      if (excel.tables.isEmpty) {
+        throw Exception('File Excel kosong atau tidak valid');
+      }
 
-    setState(() {
-      categorizedWorkOrders = {'Common': [], 'Boiler': [], 'Turbin': []};
-      statusCount = {
-        'Close': 0,
-        'WShutt': 0,
-        'WMatt': 0,
-        'Inprogress': 0,
-        'Reschedule': 0,
+      setState(() {
+        categorizedWorkOrders = {'Common': [], 'Boiler': [], 'Turbin': []};
+        statusCount = {
+          'Close': 0,
+          'WShutt': 0,
+          'WMatt': 0,
+          'Inprogress': 0,
+          'Reschedule': 0,
+        };
+      });
+
+      final sheetName = excel.tables.keys.first;
+      final sheet = excel.tables[sheetName];
+
+      if (sheet == null || sheet.rows.isEmpty) {
+        throw Exception('Sheet Excel kosong');
+      }
+
+      print('Reading Excel file with ${sheet.maxRows} rows');
+
+      String currentCategory = '';
+      Map<String, int> categoryCounters = {
+        'Common': 1,
+        'Boiler': 1,  
+        'Turbin': 1,
       };
-    });
-
-    // Ambil sheet pertama (Tactical sheet)
-    final sheetName = excel.tables.keys.first;
-    final sheet = excel.tables[sheetName];
-
-    if (sheet == null || sheet.rows.isEmpty) {
-      throw Exception('Sheet Excel kosong');
-    }
-
-    print('Reading Excel file with ${sheet.maxRows} rows');
-
-    String currentCategory = ''; // Mulai tanpa kategori
-    Map<String, int> categoryCounters = {
-      'Common': 1,
-      'Boiler': 1,  
-      'Turbin': 1,
-    };
-    
-    for (int i = 0; i < sheet.maxRows; i++) {
-      final row = sheet.rows[i];
       
-      if (row.isEmpty) continue;
+      for (int i = 0; i < sheet.maxRows; i++) {
+        final row = sheet.rows[i];
+        
+        if (row.isEmpty) continue;
 
-      // Gabungkan semua cell dalam satu baris untuk deteksi divisi
-      String rowText = '';
-      for (int j = 0; j < row.length && j < 10; j++) { // Batasi maksimal 10 kolom
-        final cellValue = row[j]?.value?.toString().trim() ?? '';
-        if (cellValue.isNotEmpty) {
-          rowText += '$cellValue ';
+        String rowText = '';
+        for (int j = 0; j < row.length && j < 10; j++) {
+          final cellValue = row[j]?.value?.toString().trim() ?? '';
+          if (cellValue.isNotEmpty) {
+            rowText += '$cellValue ';
+          }
         }
-      }
-      rowText = rowText.trim().toUpperCase();
+        rowText = rowText.trim().toUpperCase();
 
-      print('Row $i: $rowText'); // Debug print
-
-      // Deteksi header divisi
-      if (rowText.contains('DIVISI COMMON')) {
-        currentCategory = 'Common';
-        print('Found DIVISI COMMON at row $i');
-        continue;
-      } else if (rowText.contains('DIVISI BOILER')) {
-        currentCategory = 'Boiler';
-        print('Found DIVISI BOILER at row $i');
-        continue;
-      } else if (rowText.contains('DIVISI TURBIN')) {
-        currentCategory = 'Turbin';
-        print('Found DIVISI TURBIN at row $i');
-        continue;
-      }
-
-      // Skip jika belum ada kategori yang terdeteksi
-      if (currentCategory.isEmpty) continue;
-
-      // Skip header row dengan kolom NO, WORK ORDER, etc.
-      if (rowText.contains('NO') && rowText.contains('WORK ORDER')) {
-        print('Skipping header row at $i');
-        continue;
-      }
-
-      // Skip baris kosong atau baris yang tidak memiliki data WO
-      if (row.length < 2) continue;
-
-      // Coba ambil data dari berbagai posisi kolom karena formatnya tidak konsisten
-      String no = '';
-      String wo = '';
-      String desc = '';
-      String typeWO = '';
-      String pic = '';
-      String status = '';
-
-      // Cari Work Order (biasanya dimulai dengan WO)
-      int woColumnIndex = -1;
-      for (int j = 0; j < row.length && j < 8; j++) {
-        final cellValue = row[j]?.value?.toString().trim() ?? '';
-        if (cellValue.toUpperCase().startsWith('WO') && cellValue.length > 2) {
-          woColumnIndex = j;
-          wo = cellValue;
-          break;
+        // Detect division headers
+        if (rowText.contains('DIVISI COMMON')) {
+          currentCategory = 'Common';
+          continue;
+        } else if (rowText.contains('DIVISI BOILER')) {
+          currentCategory = 'Boiler';
+          continue;
+        } else if (rowText.contains('DIVISI TURBIN')) {
+          currentCategory = 'Turbin';
+          continue;
         }
-      }
 
-      // Jika tidak ada WO, skip baris ini
-      if (wo.isEmpty) continue;
+        if (currentCategory.isEmpty) continue;
 
-      // Ambil nomor urut (biasanya sebelum WO atau bisa jadi angka di kolom pertama)
-      if (woColumnIndex > 0) {
-        no = row[woColumnIndex - 1]?.value?.toString().trim() ?? '';
-        // Jika bukan angka, gunakan counter kategori
-        if (!RegExp(r'^\d+$').hasMatch(no)) {
+        if (rowText.contains('NO') && rowText.contains('WORK ORDER')) {
+          continue;
+        }
+
+        if (row.length < 2) continue;
+
+        String no = '';
+        String wo = '';
+        String desc = '';
+        String typeWO = '';
+        String pic = '';
+        String status = '';
+
+        // Find Work Order
+        int woColumnIndex = -1;
+        for (int j = 0; j < row.length && j < 8; j++) {
+          final cellValue = row[j]?.value?.toString().trim() ?? '';
+          if (cellValue.toUpperCase().startsWith('WO') && cellValue.length > 2) {
+            woColumnIndex = j;
+            wo = cellValue;
+            break;
+          }
+        }
+
+        if (wo.isEmpty) continue;
+
+        // Get number
+        if (woColumnIndex > 0) {
+          no = row[woColumnIndex - 1]?.value?.toString().trim() ?? '';
+          if (!RegExp(r'^\d+$').hasMatch(no)) {
+            no = categoryCounters[currentCategory].toString();
+          }
+        } else {
           no = categoryCounters[currentCategory].toString();
         }
-      } else {
-        no = categoryCounters[currentCategory].toString();
-      }
 
-      // Ambil deskripsi (biasanya setelah WO)
-      if (woColumnIndex >= 0 && woColumnIndex + 1 < row.length) {
-        desc = row[woColumnIndex + 1]?.value?.toString().trim() ?? '';
-      }
+        // Get description
+        if (woColumnIndex >= 0 && woColumnIndex + 1 < row.length) {
+          desc = row[woColumnIndex + 1]?.value?.toString().trim() ?? '';
+        }
 
-      // Cari Type WO (PM, CM, PAM)
-      for (int j = 0; j < row.length; j++) {
-        final cellValue = row[j]?.value?.toString().trim().toUpperCase() ?? '';
-        if (cellValue == 'PM' || cellValue == 'CM') {
-          typeWO = cellValue;
-          
-          // PIC biasanya setelah Type WO
-          if (j + 1 < row.length) {
-            pic = row[j + 1]?.value?.toString().trim() ?? '';
-          }
-          
-          // Status biasanya setelah PIC
-          if (j + 2 < row.length) {
-            final statusValue = row[j + 2]?.value?.toString().trim() ?? '';
-            if (statusValue.isNotEmpty) {
-              // Mapping status dari Excel ke format aplikasi
-              switch (statusValue.toLowerCase()) {
-                case 'close':
-                  status = 'Close';
-                  break;
-                case 'wshut':
-                case 'wshut mill':
-                case 'wshut':
-                  status = 'WShutt';
-                  break;
-                case 'wmatt':
-                  status = 'WMatt';
-                  break;
-                case 'inprogress':
-                case 'in progress':
-                  status = 'Inprogress';
-                  break;
-                case 'reschedule':
-                  status = 'Reschedule';
-                  break;
+        // Find Type WO and PIC
+        for (int j = 0; j < row.length; j++) {
+          final cellValue = row[j]?.value?.toString().trim().toUpperCase() ?? '';
+          if (cellValue == 'PM' || cellValue == 'CM') {
+            typeWO = cellValue;
+            
+            if (j + 1 < row.length) {
+              pic = row[j + 1]?.value?.toString().trim() ?? '';
+            }
+            
+            if (j + 2 < row.length) {
+              final statusValue = row[j + 2]?.value?.toString().trim() ?? '';
+              if (statusValue.isNotEmpty) {
+                switch (statusValue.toLowerCase()) {
+                  case 'close':
+                    status = 'Close';
+                    break;
+                  case 'wshut':
+                  case 'wshut mill':
+                  case 'wshutt':
+                    status = 'WShutt';
+                    break;
+                  case 'wmatt':
+                    status = 'WMatt';
+                    break;
+                  case 'inprogress':
+                  case 'in progress':
+                    status = 'Inprogress';
+                    break;
+                  case 'reschedule':
+                    status = 'Reschedule';
+                    break;
+                }
               }
             }
-          }
-          break;
-        }
-      }
-
-      // Jika tidak ada Type WO yang ditemukan, coba cari di seluruh baris
-      if (typeWO.isEmpty) {
-        for (int j = 0; j < row.length; j++) {
-          final cellValue = row[j]?.value?.toString().trim() ?? '';
-          if (cellValue.toUpperCase().contains('PM') || 
-              cellValue.toUpperCase().contains('CM')) {
-            if (cellValue.toUpperCase().startsWith('PM')) {
-              typeWO = 'PM';
-            } else if (cellValue.toUpperCase().startsWith('CM')) typeWO = 'CM';
             break;
           }
         }
-      }
 
-      // Jika masih tidak ada PIC, cari nama yang bukan status
-      if (pic.isEmpty) {
-        for (int j = 0; j < row.length; j++) {
-          final cellValue = row[j]?.value?.toString().trim() ?? '';
-          if (cellValue.isNotEmpty && 
-              !cellValue.toUpperCase().startsWith('WO') &&
-              !['PM', 'CM', 'CLOSE', 'WSHUT', 'WMATT', 'INPROGRESS', 'RESCHEDULE'].contains(cellValue.toUpperCase()) &&
-              !RegExp(r'^\d+$').hasMatch(cellValue) &&
-              cellValue.length > 2) {
-            pic = cellValue;
-            break;
-          }
-        }
-      }
-
-      // Hanya proses jika ada Work Order dan ini adalah Tactical WO (PM, CM, atau PAM)
-      if (wo.isNotEmpty && (typeWO == 'PM' || typeWO == 'CM')) {
-        
-        // Buat entry baru
-        final newEntry = {
-          'no': int.tryParse(no) ?? categoryCounters[currentCategory]!,
-          'wo': wo,
-          'desc': desc.isNotEmpty ? desc : 'Deskripsi tidak tersedia',
-          'typeWO': typeWO,
-          'pic': pic.isNotEmpty ? pic : 'PIC tidak tersedia',
-          'status': status.isNotEmpty ? status : null,
-          'photo': false,
-          'photoPath': null,
-          'photoData': null,
-          'timestamp': DateTime.now().toIso8601String(),
-          'userId': '', // Kosong saat import, akan diisi saat ada yang update
-          'jenis_wo': 'Tactical',
-        };
-
-        setState(() {
-          categorizedWorkOrders[currentCategory]!.add(newEntry);
+        // Process PM, CM, and other types (not just PM/CM)
+        if (wo.isNotEmpty && (typeWO == 'PM' || typeWO == 'CM' || typeWO.isNotEmpty)) {
           
-          // Update status count jika ada status
-          if (status.isNotEmpty && statusCount.containsKey(status)) {
-            statusCount[status] = statusCount[status]! + 1;
-          }
-        });
+          final newEntry = {
+            'no': int.tryParse(no) ?? categoryCounters[currentCategory]!,
+            'wo': wo,
+            'desc': desc.isNotEmpty ? desc : 'Deskripsi tidak tersedia',
+            'typeWO': typeWO.isNotEmpty ? typeWO : 'Other',
+            'pic': pic.isNotEmpty ? pic : 'PIC tidak tersedia',
+            'status': status.isNotEmpty ? status : null,
+            'photo': false,
+            'photoPath': null,
+            'photoData': null,
+            'timestamp': DateTime.now().toIso8601String(),
+            'assignedTo': pic.isNotEmpty ? pic : 'PIC tidak tersedia',
+            'jenis_wo': 'Tactical',
+            'date': DateTime.now().toIso8601String().split('T')[0],
+          };
 
-        categoryCounters[currentCategory] = categoryCounters[currentCategory]! + 1;
-        print('Added WO: $wo to category: $currentCategory with status: $status, PIC: $pic, Type: $typeWO');
+          setState(() {
+            categorizedWorkOrders[currentCategory]!.add(newEntry);
+            
+            if (status.isNotEmpty && statusCount.containsKey(status)) {
+              statusCount[status] = statusCount[status]! + 1;
+            }
+          });
+
+          categoryCounters[currentCategory] = categoryCounters[currentCategory]! + 1;
+          print('Added WO: $wo to category: $currentCategory with PIC: $pic, Type: $typeWO');
+        }
       }
+
+      // Add empty row for admin
+      if (_currentUser?.isAdmin == true) {
+        categorizedWorkOrders.forEach((key, value) {
+          value.add({
+            'no': value.length + 1,
+            'wo': '',
+            'desc': '',
+            'typeWO': '', 
+            'pic': '',
+            'status': null,
+            'photo': false,
+            'photoPath': null,
+            'photoData': null,
+            'timestamp': DateTime.now().toIso8601String(),
+            'assignedTo': '',
+            'jenis_wo': 'Tactical',
+            'date': DateTime.now().toIso8601String().split('T')[0],
+          });
+        });
+      }
+
+      await _saveData();
+
+      int totalItems = categorizedWorkOrders.values.fold(0, (sum, list) => sum + list.length - 1);
+      print('Excel import completed. Total items: $totalItems');
+      
+    } catch (e) {
+      print('Error reading Excel file: $e');
+      throw Exception('Error reading Excel file: $e');
     }
-
-    // Tambahkan baris kosong di akhir setiap kategori untuk input baru
-    categorizedWorkOrders.forEach((key, value) {
-      value.add({
-        'no': value.length + 1,
-        'wo': '',
-        'desc': '',
-        'typeWO': '', 
-        'pic': '',
-        'status': null,
-        'photo': false,
-        'photoPath': null,
-        'photoData': null,
-        'timestamp': DateTime.now().toIso8601String(),
-        'userId': _currentUserId ?? '', // Set userId saat import
-        'jenis_wo': 'Tactical',
-      });
-    });
-
-    await _saveData();
-
-    int totalItems = categorizedWorkOrders.values.fold(0, (sum, list) => sum + list.length - 1);
-    print('Excel import completed. Total items: $totalItems');
-    print('Common: ${categorizedWorkOrders['Common']!.length - 1} items');
-    print('Boiler: ${categorizedWorkOrders['Boiler']!.length - 1} items');
-    print('Turbin: ${categorizedWorkOrders['Turbin']!.length - 1} items');
-    
-  } catch (e) {
-    print('Error reading Excel file: $e');
-    throw Exception('Error reading Excel file: $e');
   }
-}
 
   void _updateStatus(String kategori, int index, String? newStatus) async {
     final row = categorizedWorkOrders[kategori]![index];
     final oldStatus = row['status'];
+
+    // Admin cannot change status
+    if (_currentUser?.isAdmin == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Admin tidak dapat mengubah status task'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    // Member can only change status of their own tasks
+    final picName = row['pic']?.toString().toLowerCase() ?? '';
+    final username = _currentUser?.username.toLowerCase() ?? '';
+    
+    if (picName != username) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Anda hanya dapat mengubah status task yang ditugaskan kepada Anda'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
 
     if (newStatus == 'Close') {
       if (row['wo'].toString().trim().isEmpty) {
@@ -785,16 +752,39 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
 
       row['status'] = newStatus;
       row['timestamp'] = DateTime.now().toIso8601String();
-      // PENTING: Set userId ke user yang sedang login saat update status
-      row['userId'] = _currentUserId ?? '';
     });
-
-    print('Status updated by user: $_currentUserId for WO: ${row['wo']}'); // Debug log
 
     await _saveData();
   }
 
   void _uploadPhoto(String kategori, int index) async {
+    final row = categorizedWorkOrders[kategori]![index];
+    
+    // Admin cannot upload photos
+    if (_currentUser?.isAdmin == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Admin tidak dapat mengupload foto'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    // Member can only upload photos for their own tasks
+    final picName = row['pic']?.toString().toLowerCase() ?? '';
+    final username = _currentUser?.username.toLowerCase() ?? '';
+    
+    if (picName != username) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Anda hanya dapat mengupload foto untuk task yang ditugaskan kepada Anda'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     try {
       final ImageSource? source = await showDialog<ImageSource>(
         context: context,
@@ -839,8 +829,6 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
           categorizedWorkOrders[kategori]![index]['photoData'] = base64Image;
           categorizedWorkOrders[kategori]![index]['timestamp'] =
               DateTime.now().toIso8601String();
-          // Set userId ke user yang sedang login saat upload foto
-          categorizedWorkOrders[kategori]![index]['userId'] = _currentUserId ?? '';
         });
 
         await _saveData();
@@ -910,13 +898,14 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
                       onPressed: () => Navigator.pop(context),
                       child: Text('Tutup'),
                     ),
-                    ElevatedButton(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        _uploadPhoto(kategori, index);
-                      },
-                      child: Text('Ganti Foto'),
-                    ),
+                    if (!(_currentUser?.isAdmin == true))
+                      ElevatedButton(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _uploadPhoto(kategori, index);
+                        },
+                        child: Text('Ganti Foto'),
+                      ),
                   ],
                 ),
               ],
@@ -928,8 +917,10 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
   }
 
   void _checkAndAddNewRow(String kategori) async {
-    final list = categorizedWorkOrders[kategori]!;
+    // Only admin can add new rows
+    if (!(_currentUser?.isAdmin == true)) return;
 
+    final list = categorizedWorkOrders[kategori]!;
     if (list.isEmpty) return;
 
     final last = list.last;
@@ -949,8 +940,9 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
           'photoPath': null,
           'photoData': null,
           'timestamp': DateTime.now().toIso8601String(),
-          'userId': _currentUserId ?? '',
+          'assignedTo': '',
           'jenis_wo': 'Tactical',
+          'date': DateTime.now().toIso8601String().split('T')[0],
         });
       });
       await _saveData();
@@ -963,27 +955,99 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
     String field,
     String value,
   ) async {
+    // Only admin can edit task data
+    if (!(_currentUser?.isAdmin == true)) return;
+
     setState(() {
       categorizedWorkOrders[kategori]![index][field] = value;
       categorizedWorkOrders[kategori]![index]['timestamp'] =
           DateTime.now().toIso8601String();
-      // Set userId ke user yang sedang login saat update data
-      categorizedWorkOrders[kategori]![index]['userId'] = _currentUserId ?? '';
+      
+      // Update assignedTo when PIC is changed
+      if (field == 'pic') {
+        categorizedWorkOrders[kategori]![index]['assignedTo'] = value;
+      }
     });
 
     _checkAndAddNewRow(kategori);
     await _saveData();
   }
 
-  // Manual sync button
-  Future<void> _manualSync() async {
-    await _saveToFirebase();
+  // Date filter functions
+  Future<void> _selectDate() async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: selectedDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+    );
+    
+    if (picked != null && picked != selectedDate) {
+      setState(() {
+        selectedDate = picked;
+        selectedMonth = picked.month.toString().padLeft(2, '0');
+        selectedYear = picked.year.toString();
+      });
+      await _loadFromFirebase();
+    }
+  }
+
+  Widget _buildDateFilter() {
+    return ModernCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.date_range, color: Colors.blue.shade600),
+              SizedBox(width: 8),
+              Text(
+                'Filter Tanggal',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: Colors.grey.shade800,
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _selectDate,
+                  icon: Icon(Icons.calendar_today, size: 16),
+                  label: Text('${selectedDate.day}/${selectedDate.month}/${selectedDate.year}'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue.shade600,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+              SizedBox(width: 12),
+              ElevatedButton.icon(
+                onPressed: _loadFromFirebase,
+                icon: Icon(Icons.refresh, size: 16),
+                label: Text('Refresh'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green.shade600,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildTable(String kategori) {
     final list = categorizedWorkOrders[kategori]!;
 
-    if (list.isEmpty || list.last['wo'].toString().trim().isNotEmpty) {
+    // Add empty row only for admin
+    if (_currentUser?.isAdmin == true && 
+        (list.isEmpty || list.last['wo'].toString().trim().isNotEmpty)) {
       list.add({
         'no': list.length + 1,
         'wo': '',
@@ -995,8 +1059,9 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
         'photoPath': null,
         'photoData': null,
         'timestamp': DateTime.now().toIso8601String(),
-        'userId': _currentUserId ?? '',
+        'assignedTo': '',
         'jenis_wo': 'Tactical',
+        'date': DateTime.now().toIso8601String().split('T')[0],
       });
     }
 
@@ -1064,12 +1129,17 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
               rows: List.generate(list.length, (index) {
                 final row = list[index];
                 final isEmptyRow = row['wo'].toString().trim().isEmpty;
+                final isAdminMode = _currentUser?.isAdmin == true;
+                final picName = row['pic']?.toString().toLowerCase() ?? '';
+                final username = _currentUser?.username.toLowerCase() ?? '';
+                final isMyTask = picName == username;
 
                 return DataRow(
                   color: WidgetStateProperty.resolveWith<Color?>((
                     Set<WidgetState> states,
                   ) {
                     if (isEmptyRow) return Colors.grey.shade50;
+                    if (!isAdminMode && isMyTask) return Colors.blue.shade50;
                     return null;
                   }),
                   cells: [
@@ -1077,7 +1147,7 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
                     DataCell(
                       SizedBox(
                         width: 120,
-                        child: TextFormField(
+                        child: isAdminMode ? TextFormField(
                           initialValue: row['wo'].toString(),
                           decoration: InputDecoration(
                             border: InputBorder.none,
@@ -1086,13 +1156,13 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
                           ),
                           onChanged:
                               (val) => _updateRowData(kategori, index, 'wo', val),
-                        ),
+                        ) : Text(row['wo'].toString()),
                       ),
                     ),
                     DataCell(
                       SizedBox(
                         width: 400,
-                        child: TextFormField(
+                        child: isAdminMode ? TextFormField(
                           initialValue: row['desc'].toString(),
                           decoration: InputDecoration(
                             border: InputBorder.none,
@@ -1103,14 +1173,18 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
                           onChanged:
                               (val) =>
                                   _updateRowData(kategori, index, 'desc', val),
+                        ) : Text(
+                          row['desc'].toString(),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ),
                     DataCell(
-                    SizedBox(
-                      width: 100,
-                      child: TextFormField(
-                        initialValue: row['typeWO'].toString(),
+                      SizedBox(
+                        width: 100,
+                        child: isAdminMode ? TextFormField(
+                          initialValue: row['typeWO'].toString(),
                           decoration: InputDecoration(
                             border: InputBorder.none,
                             hintText: 'Type WO',
@@ -1119,13 +1193,13 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
                           onChanged:
                               (val) =>
                                   _updateRowData(kategori, index, 'typeWO', val),
-                        ),
+                        ) : Text(row['typeWO'].toString()),
                       ),
                     ),
                     DataCell(
                       SizedBox(
                         width: 100,
-                        child: TextFormField(
+                        child: isAdminMode ? TextFormField(
                           initialValue: row['pic'].toString(),
                           decoration: InputDecoration(
                             border: InputBorder.none,
@@ -1134,6 +1208,19 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
                           ),
                           onChanged:
                               (val) => _updateRowData(kategori, index, 'pic', val),
+                        ) : Container(
+                          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: isMyTask ? Colors.blue.shade100 : Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            row['pic'].toString(),
+                            style: TextStyle(
+                              color: isMyTask ? Colors.blue.shade700 : Colors.grey.shade700,
+                              fontWeight: isMyTask ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -1162,10 +1249,9 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
                               (e) => DropdownMenuItem(value: e, child: Text(e)),
                             ),
                           ],
-                          onChanged:
-                              isEmptyRow
-                                  ? null
-                                  : (val) => _updateStatus(kategori, index, val),
+                          onChanged: (isEmptyRow || isAdminMode || !isMyTask) 
+                              ? null 
+                              : (val) => _updateStatus(kategori, index, val),
                         ),
                       ),
                     ),
@@ -1193,10 +1279,9 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
                                 size: 20,
                                 color: row['photo'] ? Colors.green : Colors.grey,
                               ),
-                              onPressed:
-                                  isEmptyRow
-                                      ? null
-                                      : () => _uploadPhoto(kategori, index),
+                              onPressed: (isEmptyRow || isAdminMode || !isMyTask)
+                                  ? null
+                                  : () => _uploadPhoto(kategori, index),
                               tooltip:
                                   row['photo']
                                       ? 'Lihat/Ganti Foto'
@@ -1218,13 +1303,19 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_currentUser == null) {
+      return Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       backgroundColor: Colors.grey.shade50,
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
         title: Text(
-          'Tactical WO',
+          'Tactical WO - ${_currentUser!.role.toUpperCase()}',
           style: TextStyle(
             color: Colors.grey.shade800,
             fontWeight: FontWeight.bold,
@@ -1245,110 +1336,158 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
       body: ListView(
         padding: EdgeInsets.all(16),
         children: [
-          // File Upload Section
-          ModernCard(
-            child: Column(
-              children: [
-                Container(
-                  padding: EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.upload_file,
-                        size: 32,
-                        color: Colors.blue.shade600,
-                      ),
-                      SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Upload File Excel',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
-                                color: Colors.blue.shade700,
-                              ),
-                            ),
-                            SizedBox(height: 4),
-                            Text(
-                              'Import data pekerjaan dari file Excel',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.blue.shade600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: isLoadingFile ? null : _pickFile,
-                        icon: isLoadingFile
-                            ? SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : Icon(Icons.file_upload),
-                        label: Text(
-                          isLoadingFile ? 'Loading...' : 'Pilih File Excel',
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue.shade600,
-                          foregroundColor: Colors.white,
-                          padding: EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                if (selectedFileName != 'Tidak ada file yang dipilih') ...[
-                  SizedBox(height: 12),
+          // Date Filter
+          _buildDateFilter(),
+          
+          SizedBox(height: 16),
+
+          // File Upload Section (Admin Only)
+          if (_currentUser!.isAdmin) ...[
+            ModernCard(
+              child: Column(
+                children: [
                   Container(
-                    padding: EdgeInsets.all(12),
+                    padding: EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: Colors.green.shade50,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.green.shade200),
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.check_circle, color: Colors.green.shade700, size: 16),
-                        SizedBox(width: 8),
+                        Icon(
+                          Icons.upload_file,
+                          size: 32,
+                          color: Colors.blue.shade600,
+                        ),
+                        SizedBox(width: 16),
                         Expanded(
-                          child: Text(
-                            selectedFileName,
-                            style: TextStyle(
-                              color: Colors.green.shade700,
-                              fontWeight: FontWeight.w500,
-                              fontSize: 12,
-                            ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Upload File Excel (Admin Only)',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                  color: Colors.blue.shade700,
+                                ),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                'Import data pekerjaan dari file Excel',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.blue.shade600,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
                     ),
                   ),
+                  SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: isLoadingFile ? null : _pickFile,
+                          icon: isLoadingFile
+                              ? SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : Icon(Icons.file_upload),
+                          label: Text(
+                            isLoadingFile ? 'Loading...' : 'Pilih File Excel',
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue.shade600,
+                            foregroundColor: Colors.white,
+                            padding: EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (selectedFileName != 'Tidak ada file yang dipilih') ...[
+                    SizedBox(height: 12),
+                    Container(
+                      padding: EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.green.shade200),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.check_circle, color: Colors.green.shade700, size: 16),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              selectedFileName,
+                              style: TextStyle(
+                                color: Colors.green.shade700,
+                                fontWeight: FontWeight.w500,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
+            SizedBox(height: 24),
+          ],
 
-          SizedBox(height: 24),
+          // Info for Members
+          if (!_currentUser!.isAdmin) ...[
+            ModernCard(
+              child: Container(
+                padding: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info, color: Colors.blue.shade600, size: 24),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Halo ${_currentUser!.username}!',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue.shade700,
+                            ),
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            'Anda hanya dapat melihat dan mengelola task yang ditugaskan kepada Anda (PIC = ${_currentUser!.username})',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.blue.shade600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            SizedBox(height: 24),
+          ],
 
           // Tables
           _buildTable('Common'),
