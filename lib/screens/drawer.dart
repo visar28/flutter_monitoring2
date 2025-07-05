@@ -6,6 +6,7 @@ import 'package:apkmonitoring/screens/profilanggota_screen.dart';
 import 'package:apkmonitoring/screens/ubahpassword_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:apkmonitoring/screens/home_screen.dart';
+import 'package:apkmonitoring/screens/task_management_screen.dart';
 import 'nontactical_screen.dart';
 import '../models/user_model.dart';
 import '../services/auth_service.dart';
@@ -77,18 +78,33 @@ class _AppDrawerState extends State<AppDrawer> {
             ),
           ),
           
-          // Work Order Management
+          // Dashboard
           ListTile(
-            leading: Icon(Icons.work, color: Colors.green.shade700),
-            title: Text('Tactical WO'),
+            leading: Icon(Icons.dashboard, color: Colors.green.shade700),
+            title: Text('Dashboard'),
             onTap: () {
               Navigator.pop(context);
-              Navigator.push(
+              Navigator.pushReplacement(
                 context,
                 MaterialPageRoute(builder: (context) => TacticalWOPage()),
               );
             },
           ),
+          
+          // Task Management
+          ListTile(
+            leading: Icon(Icons.task, color: Colors.green.shade700),
+            title: Text('Task Management'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => TaskManagementScreen()),
+              );
+            },
+          ),
+          
+          // Work Order Management
           ListTile(
             leading: Icon(Icons.work_outline, color: Colors.green.shade700),
             title: Text('Non-Tactical WO'),
