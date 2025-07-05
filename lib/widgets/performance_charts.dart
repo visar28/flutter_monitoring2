@@ -20,6 +20,8 @@ class PerformanceCharts extends StatelessWidget {
         _buildMonthlyChart(),
         SizedBox(height: 24),
         _buildRankingChart(),
+        SizedBox(height: 24),
+        _buildDetailedPerformanceTable(),
       ],
     );
   }
@@ -42,7 +44,7 @@ class PerformanceCharts extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Kinerja Mingguan PIC',
+            'Kinerja Mingguan PIC (Technical + Non-Technical)',
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
@@ -79,7 +81,7 @@ class PerformanceCharts extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Kinerja Bulanan PIC',
+            'Kinerja Bulanan PIC (Technical + Non-Technical)',
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
@@ -148,6 +150,8 @@ class PerformanceCharts extends StatelessWidget {
             final percentage = data['percentage'] as double;
             final completed = data['completedTasks'] as int;
             final total = data['totalTasks'] as int;
+            final technicalTasks = data['technicalTasks'] as int;
+            final nonTechnicalTasks = data['nonTechnicalTasks'] as int;
 
             Color rankColor;
             IconData rankIcon;
@@ -178,56 +182,215 @@ class PerformanceCharts extends StatelessWidget {
                 borderRadius: BorderRadius.circular(8),
                 border: index < 3 ? Border.all(color: rankColor, width: 1) : null,
               ),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    width: 30,
-                    height: 30,
-                    decoration: BoxDecoration(
-                      color: rankColor,
-                      borderRadius: BorderRadius.circular(15),
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(rankIcon, color: Colors.white, size: 12),
-                        Text(
-                          '${index + 1}',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 8,
-                            fontWeight: FontWeight.bold,
-                          ),
+                  Row(
+                    children: [
+                      Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: rankColor,
+                          borderRadius: BorderRadius.circular(15),
                         ),
-                      ],
-                    ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(rankIcon, color: Colors.white, size: 12),
+                            Text(
+                              '${index + 1}',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 8,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              pic,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
+                            Text(
+                              '$completed/$total (${percentage.toStringAsFixed(1)}%)',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          pic,
+                  SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Container(
+                        padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.shade100,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          'Tech: $technicalTasks',
                           style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.blue.shade700,
                             fontWeight: FontWeight.bold,
-                            fontSize: 14,
                           ),
                         ),
-                        Text(
-                          '$completed/$total (${percentage.toStringAsFixed(1)}%)',
+                      ),
+                      SizedBox(width: 4),
+                      Container(
+                        padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.purple.shade100,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          'Non-Tech: $nonTechnicalTasks',
                           style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey.shade600,
+                            fontSize: 10,
+                            color: Colors.purple.shade700,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             );
           }).toList(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDetailedPerformanceTable() {
+    final sortedMonthly = monthlyPerformance.entries.toList()
+      ..sort((a, b) => (b.value['percentage'] as double).compareTo(a.value['percentage'] as double));
+
+    return Container(
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Detail Performance Bulanan (Technical + Non-Technical)',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey.shade800,
+            ),
+          ),
+          SizedBox(height: 16),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: DataTable(
+              headingRowColor: WidgetStateProperty.all(Colors.green.shade50),
+              headingTextStyle: TextStyle(
+                color: Colors.green.shade800,
+                fontWeight: FontWeight.bold,
+              ),
+              columns: [
+                DataColumn(label: Text('Rank')),
+                DataColumn(label: Text('PIC')),
+                DataColumn(label: Text('Total Tasks')),
+                DataColumn(label: Text('Technical')),
+                DataColumn(label: Text('Non-Technical')),
+                DataColumn(label: Text('Completed')),
+                DataColumn(label: Text('Performance')),
+              ],
+              rows: sortedMonthly.asMap().entries.map((entry) {
+                final index = entry.key;
+                final pic = entry.value.key;
+                final data = entry.value.value;
+                final percentage = data['percentage'] as double;
+                final completed = data['completedTasks'] as int;
+                final total = data['totalTasks'] as int;
+                final technicalTasks = data['technicalTasks'] as int;
+                final nonTechnicalTasks = data['nonTechnicalTasks'] as int;
+                final technicalCompleted = data['technicalCompleted'] as int;
+                final nonTechnicalCompleted = data['nonTechnicalCompleted'] as int;
+
+                Color performanceColor;
+                if (percentage >= 80) {
+                  performanceColor = Colors.green;
+                } else if (percentage >= 60) {
+                  performanceColor = Colors.orange;
+                } else if (percentage >= 40) {
+                  performanceColor = Colors.amber;
+                } else {
+                  performanceColor = Colors.red;
+                }
+
+                return DataRow(
+                  cells: [
+                    DataCell(
+                      Container(
+                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: index < 3 ? Colors.amber.shade100 : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          '${index + 1}',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: index < 3 ? Colors.amber.shade700 : Colors.grey.shade700,
+                          ),
+                        ),
+                      ),
+                    ),
+                    DataCell(Text(pic, style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataCell(Text('$total')),
+                    DataCell(Text('$technicalTasks')),
+                    DataCell(Text('$nonTechnicalTasks')),
+                    DataCell(Text('$completed ($technicalCompleted + $nonTechnicalCompleted)')),
+                    DataCell(
+                      Container(
+                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: performanceColor.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          '${percentage.toStringAsFixed(1)}%',
+                          style: TextStyle(
+                            color: performanceColor,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              }).toList(),
+            ),
+          ),
         ],
       ),
     );

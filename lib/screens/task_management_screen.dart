@@ -17,14 +17,17 @@ class TaskManagementScreen extends StatefulWidget {
   State<TaskManagementScreen> createState() => _TaskManagementScreenState();
 }
 
-class _TaskManagementScreenState extends State<TaskManagementScreen> {
+class _TaskManagementScreenState extends State<TaskManagementScreen> with SingleTickerProviderStateMixin {
   final TaskService _taskService = TaskService();
   final AuthService _authService = AuthService();
   final ImagePicker _picker = ImagePicker();
   
+  late TabController _tabController;
+  
   UserModel? _currentUser;
   String _selectedDate = '';
-  Map<String, dynamic> _currentTasks = {};
+  Map<String, dynamic> _technicalTasks = {};
+  Map<String, dynamic> _nonTechnicalTasks = {};
   Map<String, Map<String, dynamic>> _weeklyPerformance = {};
   Map<String, Map<String, dynamic>> _monthlyPerformance = {};
   List<String> _availableDates = [];
@@ -36,7 +39,14 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _initializeData();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _initializeData() async {
@@ -72,30 +82,42 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
 
   Future<void> _loadTasksForDate(String date) async {
     try {
-      final tasks = await _taskService.getTasksForDate(date);
+      final allTasks = await _taskService.getAllTasksForDate(date);
       
       // Filter tasks based on user role
-      Map<String, dynamic> filteredTasks = {};
+      Map<String, dynamic> filteredTechnicalTasks = {};
+      Map<String, dynamic> filteredNonTechnicalTasks = {};
       
       if (_currentUser!.isAdmin) {
         // Admin sees all tasks
-        filteredTasks = tasks;
+        filteredTechnicalTasks = allTasks['technical']!;
+        filteredNonTechnicalTasks = allTasks['nontechnical']!;
       } else {
         // Members only see their own tasks
-        tasks.forEach((key, value) {
+        final username = _currentUser!.username.toLowerCase();
+        
+        allTasks['technical']!.forEach((key, value) {
           if (value is Map<String, dynamic>) {
             final taskPIC = value['pic']?.toString().toLowerCase() ?? '';
-            final username = _currentUser!.username.toLowerCase();
-            
             if (taskPIC == username) {
-              filteredTasks[key] = value;
+              filteredTechnicalTasks[key] = value;
+            }
+          }
+        });
+        
+        allTasks['nontechnical']!.forEach((key, value) {
+          if (value is Map<String, dynamic>) {
+            final taskPIC = value['pic']?.toString().toLowerCase() ?? '';
+            if (taskPIC == username) {
+              filteredNonTechnicalTasks[key] = value;
             }
           }
         });
       }
       
       setState(() {
-        _currentTasks = filteredTasks;
+        _technicalTasks = filteredTechnicalTasks;
+        _nonTechnicalTasks = filteredNonTechnicalTasks;
       });
     } catch (e) {
       print('Error loading tasks: $e');
@@ -151,7 +173,7 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
     }
   }
 
-  Future<void> _pickExcelFile() async {
+  Future<void> _pickExcelFile(bool isTechnical) async {
     if (!_currentUser!.isAdmin) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -173,14 +195,14 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
         final file = result.files.first;
 
         if (file.bytes != null) {
-          await _readExcelFile(file.bytes!);
+          await _readExcelFile(file.bytes!, isTechnical);
           setState(() {
             _selectedFileName = file.name;
           });
 
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('File Excel berhasil dimuat: ${file.name}'),
+              content: Text('File Excel ${isTechnical ? 'Technical' : 'Non-Technical'} berhasil dimuat: ${file.name}'),
               backgroundColor: Colors.green,
             ),
           );
@@ -196,7 +218,7 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
     }
   }
 
-  Future<void> _readExcelFile(Uint8List bytes) async {
+  Future<void> _readExcelFile(Uint8List bytes, bool isTechnical) async {
     try {
       final excel = ex.Excel.decodeBytes(bytes);
       
@@ -222,7 +244,11 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
       }
 
       // Process Excel data for selected date
-      await _taskService.processExcelData(excelRows, _selectedDate);
+      if (isTechnical) {
+        await _taskService.processTechnicalExcelData(excelRows, _selectedDate);
+      } else {
+        await _taskService.processNonTechnicalExcelData(excelRows, _selectedDate);
+      }
       
       // Reload tasks and performance data
       await _loadTasksForDate(_selectedDate);
@@ -234,7 +260,17 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
     }
   }
 
-  Future<void> _addNewTask() async {
+  Future<void> _addNewTask(bool isTechnical) async {
+    if (!_currentUser!.isAdmin) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Hanya Admin yang dapat menambahkan task'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     if (!_taskService.canEditTasksForDate(_selectedDate, _currentUser!.isAdmin)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -247,7 +283,7 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
 
     final result = await showDialog<Map<String, String>>(
       context: context,
-      builder: (context) => _AddTaskDialog(),
+      builder: (context) => _AddTaskDialog(isTechnical: isTechnical),
     );
 
     if (result != null) {
@@ -259,20 +295,24 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
           'pic': result['pic']!,
           'status': 'InProgress',
           'category': result['category']!,
-          'jenis_wo': 'Tactical',
           'photo': false,
           'photoData': null,
           'assignedTo': result['pic']!,
           'createdAt': DateTime.now().toIso8601String(),
         };
 
-        await _taskService.addTask(_selectedDate, taskData);
+        if (isTechnical) {
+          await _taskService.addTechnicalTask(_selectedDate, taskData);
+        } else {
+          await _taskService.addNonTechnicalTask(_selectedDate, taskData);
+        }
+        
         await _loadTasksForDate(_selectedDate);
         await _loadPerformanceData();
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Task berhasil ditambahkan'),
+            content: Text('${isTechnical ? 'Technical' : 'Non-Technical'} task berhasil ditambahkan'),
             backgroundColor: Colors.green,
           ),
         );
@@ -287,13 +327,14 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
     }
   }
 
-  Future<void> _updateTaskStatus(String taskKey, String newStatus) async {
+  Future<void> _updateTaskStatus(String taskKey, String newStatus, bool isTechnical) async {
     try {
       await _taskService.updateTaskStatus(
         _selectedDate, 
         taskKey, 
         newStatus, 
-        _currentUser!.username
+        _currentUser!.username,
+        isTechnical
       );
       
       await _loadTasksForDate(_selectedDate);
@@ -315,7 +356,7 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
     }
   }
 
-  Future<void> _uploadPhoto(String taskKey) async {
+  Future<void> _uploadPhoto(String taskKey, bool isTechnical) async {
     try {
       final ImageSource? source = await showDialog<ImageSource>(
         context: context,
@@ -354,9 +395,15 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
         final Uint8List imageBytes = await image.readAsBytes();
         final String base64Image = base64Encode(imageBytes);
 
-        // Update task with photo data
-        _currentTasks[taskKey]['photo'] = true;
-        _currentTasks[taskKey]['photoData'] = base64Image;
+        await _taskService.updateTaskPhoto(
+          _selectedDate,
+          taskKey,
+          base64Image,
+          _currentUser!.username,
+          isTechnical
+        );
+
+        await _loadTasksForDate(_selectedDate);
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -364,8 +411,6 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
             backgroundColor: Colors.green,
           ),
         );
-
-        setState(() {});
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -406,237 +451,279 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
             ),
           ),
         ],
+        bottom: TabBar(
+          controller: _tabController,
+          labelColor: Colors.green.shade700,
+          unselectedLabelColor: Colors.grey.shade600,
+          indicatorColor: Colors.green.shade700,
+          tabs: [
+            Tab(
+              icon: Icon(Icons.engineering),
+              text: 'Technical Tasks',
+            ),
+            Tab(
+              icon: Icon(Icons.admin_panel_settings),
+              text: 'Non-Technical Tasks',
+            ),
+          ],
+        ),
       ),
       endDrawer: AppDrawer(),
       body: _isLoading
           ? Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: () async {
-                await _loadTasksForDate(_selectedDate);
-                await _loadPerformanceData();
-              },
-              child: ListView(
-                padding: EdgeInsets.all(16),
-                children: [
-                  // Date Selection
-                  _buildDateSelector(),
-                  
-                  SizedBox(height: 16),
-
-                  // Admin Controls
-                  if (_currentUser!.isAdmin) ...[
-                    _buildAdminControls(),
-                    SizedBox(height: 16),
-                  ],
-
-                  // Add Task Button (for today only)
-                  if (_taskService.canEditTasksForDate(_selectedDate, _currentUser!.isAdmin))
-                    _buildAddTaskButton(),
-
-                  SizedBox(height: 16),
-
-                  // Tasks Table
-                  _buildTasksTable(),
-
-                  SizedBox(height: 24),
-
-                  // Performance Charts
-                  if (_currentUser!.isAdmin && !_isLoadingPerformance) ...[
-                    Text(
-                      'Performance Analytics',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.grey.shade800,
+          : Column(
+              children: [
+                // Date Selection and Controls
+                Container(
+                  color: Colors.white,
+                  padding: EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      _buildDateSelector(),
+                      
+                      if (_currentUser!.isAdmin) ...[
+                        SizedBox(height: 16),
+                        _buildAdminControls(),
+                      ],
+                    ],
+                  ),
+                ),
+                
+                // Tab Content
+                Expanded(
+                  child: TabBarView(
+                    controller: _tabController,
+                    children: [
+                      // Technical Tasks Tab
+                      _buildTaskTab(
+                        tasks: _technicalTasks,
+                        isTechnical: true,
+                        emptyMessage: 'Tidak ada technical task untuk tanggal ini',
                       ),
+                      
+                      // Non-Technical Tasks Tab
+                      _buildTaskTab(
+                        tasks: _nonTechnicalTasks,
+                        isTechnical: false,
+                        emptyMessage: 'Tidak ada non-technical task untuk tanggal ini',
+                      ),
+                    ],
+                  ),
+                ),
+                
+                // Performance Charts (Admin only)
+                if (_currentUser!.isAdmin && !_isLoadingPerformance)
+                  Container(
+                    color: Colors.white,
+                    padding: EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Performance Analytics (Gabungan Technical + Non-Technical)',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.grey.shade800,
+                          ),
+                        ),
+                        SizedBox(height: 16),
+                        Container(
+                          height: 400,
+                          child: PerformanceCharts(
+                            weeklyPerformance: _weeklyPerformance,
+                            monthlyPerformance: _monthlyPerformance,
+                          ),
+                        ),
+                      ],
                     ),
-                    SizedBox(height: 16),
-                    PerformanceCharts(
-                      weeklyPerformance: _weeklyPerformance,
-                      monthlyPerformance: _monthlyPerformance,
-                    ),
-                  ],
-                ],
-              ),
+                  ),
+              ],
             ),
     );
   }
 
   Widget _buildDateSelector() {
-    return Container(
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: Offset(0, 4),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Pilih Tanggal',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+            color: Colors.grey.shade800,
           ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Pilih Tanggal',
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-              color: Colors.grey.shade800,
+        ),
+        SizedBox(height: 12),
+        DropdownButtonFormField<String>(
+          value: _selectedDate,
+          decoration: InputDecoration(
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
             ),
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           ),
-          SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            value: _selectedDate,
-            decoration: InputDecoration(
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            ),
-            items: _availableDates.map((date) {
-              final dateTime = DateTime.parse(date);
-              final isToday = date == DateTime.now().toIso8601String().split('T')[0];
-              final canEdit = _taskService.canEditTasksForDate(date, _currentUser!.isAdmin);
-              
-              return DropdownMenuItem(
-                value: date,
-                child: Row(
-                  children: [
-                    Text(
-                      '${dateTime.day}/${dateTime.month}/${dateTime.year}',
-                      style: TextStyle(
-                        fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
-                        color: isToday ? Colors.blue : Colors.black,
+          items: _availableDates.map((date) {
+            final dateTime = DateTime.parse(date);
+            final isToday = date == DateTime.now().toIso8601String().split('T')[0];
+            final canEdit = _taskService.canEditTasksForDate(date, _currentUser!.isAdmin);
+            
+            return DropdownMenuItem(
+              value: date,
+              child: Row(
+                children: [
+                  Text(
+                    '${dateTime.day}/${dateTime.month}/${dateTime.year}',
+                    style: TextStyle(
+                      fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
+                      color: isToday ? Colors.blue : Colors.black,
+                    ),
+                  ),
+                  if (isToday) ...[
+                    SizedBox(width: 8),
+                    Container(
+                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.blue,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'Hari Ini',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                        ),
                       ),
                     ),
-                    if (isToday) ...[
-                      SizedBox(width: 8),
-                      Container(
-                        padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.blue,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          'Hari Ini',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                          ),
-                        ),
-                      ),
-                    ],
-                    if (canEdit && !isToday) ...[
-                      SizedBox(width: 8),
-                      Icon(Icons.edit, size: 16, color: Colors.green),
-                    ],
                   ],
-                ),
-              );
-            }).toList(),
-            onChanged: (value) {
-              if (value != null) {
-                setState(() {
-                  _selectedDate = value;
-                });
-                _loadTasksForDate(value);
-              }
-            },
-          ),
-        ],
-      ),
+                  if (canEdit && !isToday) ...[
+                    SizedBox(width: 8),
+                    Icon(Icons.edit, size: 16, color: Colors.green),
+                  ],
+                ],
+              ),
+            );
+          }).toList(),
+          onChanged: (value) {
+            if (value != null) {
+              setState(() {
+                _selectedDate = value;
+              });
+              _loadTasksForDate(value);
+            }
+          },
+        ),
+      ],
     );
   }
 
   Widget _buildAdminControls() {
-    return Container(
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: Offset(0, 4),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Admin Controls',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+            color: Colors.grey.shade800,
           ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Admin Controls',
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-              color: Colors.grey.shade800,
+        ),
+        SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: () => _pickExcelFile(true),
+                icon: Icon(Icons.file_upload),
+                label: Text('Import Technical Excel'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue.shade600,
+                  foregroundColor: Colors.white,
+                ),
+              ),
             ),
-          ),
-          SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _pickExcelFile,
-                  icon: Icon(Icons.file_upload),
-                  label: Text('Import Excel'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue.shade600,
-                    foregroundColor: Colors.white,
-                  ),
+            SizedBox(width: 8),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: () => _pickExcelFile(false),
+                icon: Icon(Icons.file_upload),
+                label: Text('Import Non-Technical Excel'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.purple.shade600,
+                  foregroundColor: Colors.white,
                 ),
-              ),
-              SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _generateDummyData,
-                  icon: Icon(Icons.data_usage),
-                  label: Text('Generate Dummy'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange.shade600,
-                    foregroundColor: Colors.white,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          if (_selectedFileName != 'Tidak ada file yang dipilih') ...[
-            SizedBox(height: 8),
-            Text(
-              'File: $_selectedFileName',
-              style: TextStyle(
-                color: Colors.green.shade700,
-                fontSize: 12,
               ),
             ),
           ],
+        ),
+        SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            onPressed: _generateDummyData,
+            icon: Icon(Icons.data_usage),
+            label: Text('Generate Dummy Data (2 Bulan)'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange.shade600,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ),
+        if (_selectedFileName != 'Tidak ada file yang dipilih') ...[
+          SizedBox(height: 8),
+          Text(
+            'File: $_selectedFileName',
+            style: TextStyle(
+              color: Colors.green.shade700,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildTaskTab({
+    required Map<String, dynamic> tasks,
+    required bool isTechnical,
+    required String emptyMessage,
+  }) {
+    return RefreshIndicator(
+      onRefresh: () async {
+        await _loadTasksForDate(_selectedDate);
+        await _loadPerformanceData();
+      },
+      child: ListView(
+        padding: EdgeInsets.all(16),
+        children: [
+          // Add Task Button (Admin only, today only)
+          if (_currentUser!.isAdmin && _taskService.canEditTasksForDate(_selectedDate, _currentUser!.isAdmin))
+            Container(
+              width: double.infinity,
+              margin: EdgeInsets.only(bottom: 16),
+              child: ElevatedButton.icon(
+                onPressed: () => _addNewTask(isTechnical),
+                icon: Icon(Icons.add),
+                label: Text('Tambah ${isTechnical ? 'Technical' : 'Non-Technical'} Task'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isTechnical ? Colors.blue.shade600 : Colors.purple.shade600,
+                  foregroundColor: Colors.white,
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+            ),
+
+          // Tasks Table
+          _buildTasksTable(tasks, isTechnical, emptyMessage),
         ],
       ),
     );
   }
 
-  Widget _buildAddTaskButton() {
-    return Container(
-      width: double.infinity,
-      child: ElevatedButton.icon(
-        onPressed: _addNewTask,
-        icon: Icon(Icons.add),
-        label: Text('Tambah Task'),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.green.shade600,
-          foregroundColor: Colors.white,
-          padding: EdgeInsets.symmetric(vertical: 12),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTasksTable() {
-    if (_currentTasks.isEmpty) {
+  Widget _buildTasksTable(Map<String, dynamic> tasks, bool isTechnical, String emptyMessage) {
+    if (tasks.isEmpty) {
       return Container(
         padding: EdgeInsets.all(32),
         decoration: BoxDecoration(
@@ -646,10 +733,14 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
         child: Center(
           child: Column(
             children: [
-              Icon(Icons.task_alt, size: 64, color: Colors.grey.shade400),
+              Icon(
+                isTechnical ? Icons.engineering : Icons.admin_panel_settings, 
+                size: 64, 
+                color: Colors.grey.shade400
+              ),
               SizedBox(height: 16),
               Text(
-                'Tidak ada task untuk tanggal ini',
+                emptyMessage,
                 style: TextStyle(
                   fontSize: 16,
                   color: Colors.grey.shade600,
@@ -661,7 +752,7 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
       );
     }
 
-    final taskEntries = _currentTasks.entries.toList();
+    final taskEntries = tasks.entries.toList();
     final canEdit = _taskService.canEditTasksForDate(_selectedDate, _currentUser!.isAdmin);
 
     return Container(
@@ -679,9 +770,11 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: DataTable(
-          headingRowColor: WidgetStateProperty.all(Colors.green.shade50),
+          headingRowColor: WidgetStateProperty.all(
+            isTechnical ? Colors.blue.shade50 : Colors.purple.shade50
+          ),
           headingTextStyle: TextStyle(
-            color: Colors.green.shade800,
+            color: isTechnical ? Colors.blue.shade800 : Colors.purple.shade800,
             fontWeight: FontWeight.bold,
           ),
           columns: [
@@ -701,7 +794,9 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
 
             return DataRow(
               color: WidgetStateProperty.resolveWith<Color?>((states) {
-                if (isMyTask && !_currentUser!.isAdmin) return Colors.blue.shade50;
+                if (isMyTask && !_currentUser!.isAdmin) {
+                  return isTechnical ? Colors.blue.shade50 : Colors.purple.shade50;
+                }
                 return null;
               }),
               cells: [
@@ -722,13 +817,17 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
                   Container(
                     padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: isMyTask ? Colors.blue.shade100 : Colors.grey.shade100,
+                      color: isMyTask 
+                          ? (isTechnical ? Colors.blue.shade100 : Colors.purple.shade100)
+                          : Colors.grey.shade100,
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
                       task['pic'] ?? '',
                       style: TextStyle(
-                        color: isMyTask ? Colors.blue.shade700 : Colors.grey.shade700,
+                        color: isMyTask 
+                            ? (isTechnical ? Colors.blue.shade700 : Colors.purple.shade700)
+                            : Colors.grey.shade700,
                         fontWeight: isMyTask ? FontWeight.bold : FontWeight.normal,
                       ),
                     ),
@@ -764,7 +863,7 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
                         SizedBox(width: 4),
                         IconButton(
                           icon: Icon(Icons.camera_alt, size: 16),
-                          onPressed: () => _uploadPhoto(taskKey),
+                          onPressed: () => _uploadPhoto(taskKey, isTechnical),
                           tooltip: 'Upload Foto',
                         ),
                       ],
@@ -791,7 +890,7 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
                             }).toList(),
                             onChanged: (newStatus) {
                               if (newStatus != null) {
-                                _updateTaskStatus(taskKey, newStatus);
+                                _updateTaskStatus(taskKey, newStatus, isTechnical);
                               }
                             },
                           )
@@ -824,6 +923,10 @@ class _TaskManagementScreenState extends State<TaskManagementScreen> {
 }
 
 class _AddTaskDialog extends StatefulWidget {
+  final bool isTechnical;
+
+  const _AddTaskDialog({required this.isTechnical});
+
   @override
   State<_AddTaskDialog> createState() => _AddTaskDialogState();
 }
@@ -840,7 +943,7 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('Tambah Task Baru'),
+      title: Text('Tambah ${widget.isTechnical ? 'Technical' : 'Non-Technical'} Task'),
       content: Form(
         key: _formKey,
         child: Column(
@@ -875,21 +978,31 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
               },
             ),
             SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: _selectedTypeWO,
-              decoration: InputDecoration(
-                labelText: 'Type WO',
-                border: OutlineInputBorder(),
+            if (widget.isTechnical)
+              DropdownButtonFormField<String>(
+                value: _selectedTypeWO,
+                decoration: InputDecoration(
+                  labelText: 'Type WO',
+                  border: OutlineInputBorder(),
+                ),
+                items: ['PM', 'CM', 'PAM'].map((type) {
+                  return DropdownMenuItem(value: type, child: Text(type));
+                }).toList(),
+                onChanged: (value) {
+                  setState(() {
+                    _selectedTypeWO = value!;
+                  });
+                },
+              )
+            else
+              TextFormField(
+                initialValue: 'Administrative',
+                decoration: InputDecoration(
+                  labelText: 'Type WO',
+                  border: OutlineInputBorder(),
+                ),
+                enabled: false,
               ),
-              items: ['PM', 'CM', 'PAM'].map((type) {
-                return DropdownMenuItem(value: type, child: Text(type));
-              }).toList(),
-              onChanged: (value) {
-                setState(() {
-                  _selectedTypeWO = value!;
-                });
-              },
-            ),
             SizedBox(height: 12),
             TextFormField(
               controller: _picController,
@@ -905,21 +1018,31 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
               },
             ),
             SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: _selectedCategory,
-              decoration: InputDecoration(
-                labelText: 'Category',
-                border: OutlineInputBorder(),
+            if (widget.isTechnical)
+              DropdownButtonFormField<String>(
+                value: _selectedCategory,
+                decoration: InputDecoration(
+                  labelText: 'Category',
+                  border: OutlineInputBorder(),
+                ),
+                items: ['Common', 'Boiler', 'Turbin'].map((category) {
+                  return DropdownMenuItem(value: category, child: Text(category));
+                }).toList(),
+                onChanged: (value) {
+                  setState(() {
+                    _selectedCategory = value!;
+                  });
+                },
+              )
+            else
+              TextFormField(
+                initialValue: 'Administrative',
+                decoration: InputDecoration(
+                  labelText: 'Category',
+                  border: OutlineInputBorder(),
+                ),
+                enabled: false,
               ),
-              items: ['Common', 'Boiler', 'Turbin'].map((category) {
-                return DropdownMenuItem(value: category, child: Text(category));
-              }).toList(),
-              onChanged: (value) {
-                setState(() {
-                  _selectedCategory = value!;
-                });
-              },
-            ),
           ],
         ),
       ),
@@ -934,9 +1057,9 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
               Navigator.pop(context, {
                 'wo': _woController.text,
                 'desc': _descController.text,
-                'typeWO': _selectedTypeWO,
+                'typeWO': widget.isTechnical ? _selectedTypeWO : 'Administrative',
                 'pic': _picController.text,
-                'category': _selectedCategory,
+                'category': widget.isTechnical ? _selectedCategory : 'Administrative',
               });
             }
           },

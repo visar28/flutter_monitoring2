@@ -1,17 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:file_picker/file_picker.dart';
-import 'package:excel/excel.dart' as ex;
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:image_picker/image_picker.dart';
 import 'dart:convert';
-import 'dart:typed_data';
-import 'dart:io' if (dart.library.html) 'dart:html' as html;
 import 'drawer.dart';
 import '../widgets/modern_card.dart';
 import '../widgets/modern_chart_card.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import '../services/auth_service.dart';
 import '../services/task_service.dart';
 import '../models/user_model.dart';
@@ -65,35 +57,17 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
 
   Future<void> _loadDashboardData() async {
     try {
-      // Load today's tasks for status count
+      // Load today's tasks for status count (combined technical + non-technical)
       final today = DateTime.now();
       final todayStr = '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
-      final todayTasks = await _taskService.getTasksForDate(todayStr);
-      
-      // Calculate status count
-      Map<String, int> newStatusCount = {
-        'Close': 0,
-        'WShutt': 0,
-        'WMatt': 0,
-        'InProgress': 0,
-        'Reschedule': 0,
-      };
-      
-      todayTasks.forEach((key, value) {
-        if (value is Map<String, dynamic>) {
-          final status = value['status']?.toString() ?? 'InProgress';
-          if (newStatusCount.containsKey(status)) {
-            newStatusCount[status] = newStatusCount[status]! + 1;
-          }
-        }
-      });
+      final todayStatusCount = await _taskService.getStatusCountForDate(todayStr);
       
       // Load performance data
       final weeklyData = await _taskService.getWeeklyPerformance();
       final monthlyData = await _taskService.getMonthlyPerformance();
       
       setState(() {
-        statusCount = newStatusCount;
+        statusCount = todayStatusCount;
         _weeklyPerformance = weeklyData;
         _monthlyPerformance = monthlyData;
       });
@@ -226,7 +200,7 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
                   ),
                 ),
                 Text(
-                  'Total Tasks Hari Ini',
+                  'Total Tasks Hari Ini\n(Technical + Non-Technical)',
                   style: TextStyle(
                     fontSize: 12,
                     color: Colors.grey.shade600,
@@ -322,6 +296,14 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
               color: Colors.grey.shade800,
             ),
           ),
+          SizedBox(height: 8),
+          Text(
+            'Berdasarkan gabungan Technical + Non-Technical tasks',
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey.shade600,
+            ),
+          ),
           SizedBox(height: 16),
           ...sortedPerformers.take(3).map((entry) {
             final index = sortedPerformers.indexOf(entry);
@@ -330,6 +312,8 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
             final percentage = data['percentage'] as double;
             final completed = data['completedTasks'] as int;
             final total = data['totalTasks'] as int;
+            final technicalTasks = data['technicalTasks'] as int;
+            final nonTechnicalTasks = data['nonTechnicalTasks'] as int;
 
             Color rankColor;
             switch (index) {
@@ -390,6 +374,13 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
                           style: TextStyle(
                             fontSize: 12,
                             color: Colors.grey.shade600,
+                          ),
+                        ),
+                        Text(
+                          'Tech: $technicalTasks | Non-Tech: $nonTechnicalTasks',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.grey.shade500,
                           ),
                         ),
                       ],
@@ -479,6 +470,16 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
                                   color: Colors.grey.shade600,
                                 ),
                               ),
+                              if (!_currentUser!.isAdmin) ...[
+                                SizedBox(height: 4),
+                                Text(
+                                  'Anda dapat melihat dan mengelola task Technical & Non-Technical yang ditugaskan kepada Anda',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.blue.shade600,
+                                  ),
+                                ),
+                              ],
                               SizedBox(height: 8),
                               ElevatedButton(
                                 onPressed: () {
@@ -517,7 +518,7 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
                         flex: 2,
                         child: ModernChartCard(
                           title: 'Status Tasks Hari Ini',
-                          subtitle: 'Distribusi status pekerjaan',
+                          subtitle: 'Gabungan Technical + Non-Technical tasks',
                           height: 300,
                           chart: _buildPieChart(),
                         ),
@@ -581,6 +582,42 @@ class _TacticalWOPageState extends State<TacticalWOPage> {
                               ),
                             ),
                           ],
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Info Section
+                  SizedBox(height: 16),
+                  ModernCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.info_outline, color: Colors.blue.shade600),
+                            SizedBox(width: 8),
+                            Text(
+                              'Informasi Sistem',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey.shade800,
+                              ),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: 12),
+                        Text(
+                          '• Task dibagi menjadi 2 kategori: Technical dan Non-Technical\n'
+                          '• Kinerja PIC dihitung berdasarkan gabungan kedua jenis task\n'
+                          '• ${_currentUser!.isAdmin ? 'Admin dapat import Excel dan menambah task' : 'Member hanya dapat melihat dan mengelola task yang ditugaskan'}\n'
+                          '• Edit status task hanya dapat dilakukan pada hari yang sama dengan tanggal task',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey.shade600,
+                            height: 1.5,
+                          ),
                         ),
                       ],
                     ),
