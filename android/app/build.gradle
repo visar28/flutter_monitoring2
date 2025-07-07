@@ -64,10 +64,24 @@ flutter {
 dependencies {
     implementation 'androidx.multidex:multidex:2.0.1'
     
-    // Firebase BOM - Updated to latest version
+    // Firebase BOM - Updated to latest compatible version
     implementation platform('com.google.firebase:firebase-bom:33.7.0')
     implementation 'com.google.firebase:firebase-analytics'
     implementation 'com.google.firebase:firebase-auth'
     implementation 'com.google.firebase:firebase-firestore'
     implementation 'com.google.firebase:firebase-core'
+    
+    // Kotlin compatibility
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:2.1.0"
+}
+
+// Force all Kotlin modules to use the same version
+configurations.all {
+    resolutionStrategy {
+        force "org.jetbrains.kotlin:kotlin-stdlib:2.1.0"
+        force "org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.1.0"
+        force "org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.1.0"
+        force "org.jetbrains.kotlin:kotlin-stdlib-common:2.1.0"
+        force "org.jetbrains.kotlin:kotlin-reflect:2.1.0"
+    }
 }
