@@ -3,9 +3,9 @@ import 'package:file_picker/file_picker.dart';
 import 'package:excel/excel.dart' as excel;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import 'dart:html' as html;
 import 'drawer.dart';
 import '../widgets/scrollable_data_table.dart';
+import '../widgets/excel_download_button.dart';
 
 class PengambilanPage extends StatefulWidget {
   const PengambilanPage({super.key});
@@ -155,64 +155,6 @@ class _PengambilanPageState extends State<PengambilanPage> {
     _saveData();
   }
 
-  Future<void> _downloadExcel() async {
-    try {
-      var excelFile = excel.Excel.createExcel();
-      var sheet = excelFile['Pengambilan Barang'];
-
-      sheet.appendRow([
-        'No',
-        'Nama Barang',
-        'Spesifikasi',
-        'Jumlah',
-        'PIC',
-        'Peletakkan',
-        'Picking Slip'
-      ]);
-
-      for (var item in items) {
-        if (item['nama'].toString().isNotEmpty || 
-            item['spesifikasi'].toString().isNotEmpty) {
-          sheet.appendRow([
-            item['no'],
-            item['nama'],
-            item['spesifikasi'],
-            item['jumlah'],
-            item['pic'],
-            item['peletakkan'],
-            item['picking'],
-          ]);
-        }
-      }
-
-      final fileBytes = excelFile.encode();
-      if (fileBytes == null) {
-        throw Exception('Failed to generate Excel file');
-      }
-
-      final blob = html.Blob([fileBytes], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      final url = html.Url.createObjectUrlFromBlob(blob);
-      final anchor = html.AnchorElement(href: url)
-        ..setAttribute("download", "Pengambilan_Barang_${DateTime.now().millisecondsSinceEpoch}.xlsx")
-        ..click();
-      html.Url.revokeObjectUrl(url);
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('File berhasil diunduh'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
   void _toggleEditMode() {
     setState(() {
       if (isEditing) {
@@ -244,6 +186,12 @@ class _PengambilanPageState extends State<PengambilanPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Filter out empty items for export
+    final exportItems = items.where((item) => 
+      item['nama'].toString().isNotEmpty || 
+      item['spesifikasi'].toString().isNotEmpty
+    ).toList();
+
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.white,
@@ -303,14 +251,20 @@ class _PengambilanPageState extends State<PengambilanPage> {
                     foregroundColor: Colors.white,
                   ),
                 ),
-                ElevatedButton.icon(
-                  onPressed: _downloadExcel,
-                  icon: Icon(Icons.download),
-                  label: Text('Export Excel'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green.shade700,
-                    foregroundColor: Colors.white,
-                  ),
+                ExcelDownloadButton(
+                  data: exportItems,
+                  fileName: 'Pengambilan_Barang',
+                  buttonText: 'Export Excel',
+                  headers: [
+                    'No',
+                    'Nama Barang',
+                    'Spesifikasi',
+                    'Jumlah',
+                    'PIC',
+                    'Peletakkan',
+                    'Picking Slip'
+                  ],
+                  backgroundColor: Colors.green.shade700,
                 ),
               ],
             ),
