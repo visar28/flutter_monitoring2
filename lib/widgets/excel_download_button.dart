@@ -1,13 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:excel/excel.dart' as excel;
+import 'dart:typed_data';
 import '../services/file_service.dart';
 import '../utils/platform_utils.dart';
-
-// Conditional import for web
-import 'dart:typed_data';
-// ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html show Blob, Url, AnchorElement;
 
 class ExcelDownloadButton extends StatelessWidget {
   final List<Map<String, dynamic>> data;
@@ -40,7 +36,7 @@ class ExcelDownloadButton extends StatelessWidget {
       for (var item in data) {
         List<dynamic> row = [];
         for (String header in headers) {
-          // Map header to data key (you might need to adjust this mapping)
+          // Map header to data key
           String key = _mapHeaderToKey(header);
           row.add(item[key]?.toString() ?? '');
         }
@@ -53,11 +49,12 @@ class ExcelDownloadButton extends StatelessWidget {
       }
 
       final fullFileName = FileService.generateFileName(fileName);
+      final uint8FileBytes = Uint8List.fromList(fileBytes);
 
       if (PlatformUtils.isWeb) {
-        await _downloadForWeb(fileBytes, fullFileName);
+        await _downloadForWeb(uint8FileBytes, fullFileName);
       } else {
-        bool success = await FileService.saveExcelFile(fileBytes, fullFileName);
+        bool success = await FileService.saveExcelFile(uint8FileBytes, fullFileName);
         if (success) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -81,12 +78,9 @@ class ExcelDownloadButton extends StatelessWidget {
 
   Future<void> _downloadForWeb(Uint8List fileBytes, String fileName) async {
     if (kIsWeb) {
-      final blob = html.Blob([fileBytes], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      final url = html.Url.createObjectUrlFromBlob(blob);
-      final anchor = html.AnchorElement(href: url)
-        ..setAttribute("download", fileName)
-        ..click();
-      html.Url.revokeObjectUrl(url);
+      // Web-specific download logic will be handled by conditional imports
+      // For now, show a message that web download is not supported in mobile build
+      throw Exception('Web download not supported in mobile build');
     }
   }
 

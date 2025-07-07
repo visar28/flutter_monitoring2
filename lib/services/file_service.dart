@@ -20,7 +20,7 @@ class FileService {
         if (!manageStatus.isGranted) {
           manageStatus = await Permission.manageExternalStorage.request();
         }
-        return manageStatus.isGranted;
+        return manageStatus.isGranted || status.isGranted; // Accept either permission
       }
       return status.isGranted;
     }
@@ -63,14 +63,15 @@ class FileService {
   static Future<bool> saveExcelFile(Uint8List fileBytes, String fileName) async {
     try {
       if (kIsWeb) {
-        // For web, we'll handle this differently
-        return await _saveExcelFileWeb(fileBytes, fileName);
+        // For web, this should not be called
+        throw UnsupportedError('Use web-specific download method');
       }
       
       // Request permission first
       bool hasPermission = await requestStoragePermission();
       if (!hasPermission) {
-        throw Exception('Storage permission denied');
+        print('Storage permission denied, saving to app directory');
+        // Continue anyway, save to app directory
       }
       
       // Get download path
@@ -86,12 +87,6 @@ class FileService {
       print('Error saving file: $e');
       return false;
     }
-  }
-
-  static Future<bool> _saveExcelFileWeb(Uint8List fileBytes, String fileName) async {
-    // For web platform, we'll use a different approach
-    // This will be handled by the calling widget with conditional imports
-    return false;
   }
 
   static String generateFileName(String prefix) {
